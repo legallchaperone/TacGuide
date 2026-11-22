@@ -72,7 +72,13 @@ always receives the same noise; start a single model through the same script
 ## Scheduler
 
 `gpu_queue.py` (standard library only) starts the best ready job from
-`queue.gc.json` whenever a card is free. See the docstring for commands.
+`queue.gc.json` whenever cards are available: one card with room for the student and
+the teachers, or the student on one card and the teachers on a second
+(`--teacher-device cuda:1`). It never shares a card with another TacGuide process.
+See the docstring for commands.
+
+Measured at batch 64 (100 steps, w = 2, both teachers): student card 43.4 GB peak
+allocated / 53.0 GB reserved, teacher card 22.9 GB / 31.4 GB.
 
 ## Tests
 

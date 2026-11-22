@@ -20,7 +20,11 @@ GPU-ccc, 777, 290
 
 
 def gpus(*indices):
-    return [q.Gpu(i, f"GPU-{i}", 3, 0) for i in indices]
+    return [q.Gpu(i, f"GPU-{i}", 3, 0, (), 97887) for i in indices]
+
+
+def pairs(assignments):
+    return [(a.name, a.gpus[0]) for a in assignments]
 
 
 def make_queue(tmp_path, jobs):
@@ -60,17 +64,17 @@ def test_plan_takes_highest_priority_ready_job(tmp_path):
         {"name": "off", "priority": 0, "cmd": "true", "enabled": False},
     ]))
     state = {"jobs": {}, "holds": {}}
-    assert q.plan(queue, state, [5]) == [("A", 5)]                 # one card: serial, best priority first
-    assert q.plan(queue, state, [5, 2]) == [("A", 2), ("B", 5)]    # two cards: parallel
-    assert q.plan(queue, state, []) == []
+    assert pairs(q.plan(queue, state, [5])) == [("A", 5)]                 # one card: serial, best priority first
+    assert pairs(q.plan(queue, state, [5, 2])) == [("A", 2), ("B", 5)]    # two cards: parallel
+    assert pairs(q.plan(queue, state, [])) == []
     (tmp_path / "A.done").touch()
-    assert q.plan(queue, state, [1, 2, 3]) == [("B", 1), ("C", 2)]  # C needs only A; D still waits
+    assert pairs(q.plan(queue, state, [1, 2, 3])) == [("B", 1), ("C", 2)]  # C needs only A; D still waits
     (tmp_path / "B.done").touch()
-    assert q.plan(queue, state, [1, 2]) == [("C", 1)]              # D has no w yet
+    assert pairs(q.plan(queue, state, [1, 2])) == [("C", 1)]              # D has no w yet
     (tmp_path / "w.txt").write_text("1.5\n")
-    assert q.plan(queue, state, [1]) == [("D", 1)]                 # one card: D before C
+    assert pairs(q.plan(queue, state, [1])) == [("D", 1)]                 # one card: D before C
     state["jobs"]["D"] = {"status": "running", "gpu": 1}
-    assert q.plan(queue, state, [2]) == [("C", 2)]
+    assert pairs(q.plan(queue, state, [2])) == [("C", 2)]
 
 
 def test_variables_fill_commands_and_resume_switches_in(tmp_path):
@@ -140,7 +144,8 @@ def test_shipped_queue_file_is_valid():
     path = pathlib.Path(q.__file__).with_name("queue.gc.json")
     queue = json.loads(path.read_text())
     names = [job["name"] for job in queue["jobs"]]
-    assert {"train_gc_A", "train_gc_B", "train_gc_C", "train_gc_D"} <= set(names)
+    assert {"train_gc_C", "train_gc_D"} <= set(names) and not {"train_gc_A", "train_gc_B"} & set(names)
+    assert 5 not in queue["allowed_gpus"] and 7 not in queue["allowed_gpus"]
     for job in queue["jobs"]:
         assert {"cmd", "resume_cmd", "resume_if", "done_if", "priority"} <= set(job)
 
@@ -153,3 +158,54 @@ def test_unset_variable_in_paths_is_refused(tmp_path, monkeypatch):
     path.write_text(json.dumps({"cwd": str(tmp_path), "state_dir": "$TG_UNSET_FOR_TEST/queue", "log_dir": str(tmp_path), "jobs": []}))
     with pytest.raises(ValueError):
         q.load_queue(path)
+
+
+SHARED = [
+    q.Gpu(0, "GPU-0", 41843, 100, (11,), 97887),   # another user's job, 54.7 GB left
+    q.Gpu(4, "GPU-4", 41813, 100, (12,), 97887),
+    q.Gpu(5, "GPU-5", 40223, 0, (13,), 97887),     # most memory left, but not in the allowed list
+    q.Gpu(6, "GPU-6", 41795, 100, (14, 99), 97887),  # one of the project's own processes is here
+    q.Gpu(7, "GPU-7", 86628, 100, (15,), 97887),
+]
+CMDLINES = {99: "/data2/cwx/TacGuide/venv/bin/python training/run.py train", 11: "python train_eight_gpu.py"}
+
+
+def shared_queue(tmp_path, **extra):
+    job = {"name": "C", "cmd": "train {placement_args}", "done_if": "never", "placements": [
+        {"min_free_mib": [90000]},
+        {"min_free_mib": [54000, 22000], "args": "--teacher-device cuda:1"},
+    ]}
+    path = make_queue(tmp_path, [job])
+    data = json.loads(path.read_text())
+    data.update(extra)
+    path.write_text(json.dumps(data))
+    return q.load_queue(path)
+
+
+def test_placement_shares_cards_but_avoids_reserved_and_own_cards(tmp_path):
+    queue = shared_queue(tmp_path, allowed_gpus=[0, 2, 4, 6], own_marker="TacGuide")
+    state = {"jobs": {}, "holds": {}}
+    lookup = lambda pid: CMDLINES.get(pid, "")  # noqa: E731
+    # No empty card; student takes one shared card, the teacher another; never 5, 7 or the card with our own job.
+    assert q.plan(queue, state, SHARED, lookup) == [q.Assignment("C", (0, 4), "--teacher-device cuda:1")]
+    # A completely empty allowed card is preferred and needs no second card.
+    empty = [*SHARED, q.Gpu(2, "GPU-2", 4, 0, (), 97887)]
+    assert q.plan(queue, state, empty, lookup) == [q.Assignment("C", (2,), "")]
+    # With only one usable shared card the job waits.
+    assert q.plan(queue, state, [g for g in SHARED if g.index != 4], lookup) == []
+
+
+def test_two_card_job_gets_both_cards_and_releases_both(tmp_path):
+    queue_path = tmp_path / "queue.json"
+    queue = shared_queue(tmp_path, allowed_gpus=[0, 4])
+    queue["jobs"][0]["cmd"] = "echo $CUDA_VISIBLE_DEVICES {placement_args} > cards.txt && sleep 300"
+    queue_path.write_text(json.dumps(queue))
+    queue = q.load_queue(queue_path)
+    assert q.tick(queue, read=lambda: SHARED, confirm_seconds=0, log=lambda m: None, cmdline_of=lambda pid: "") == [("C", 0)]
+    assert wait_for(lambda: (tmp_path / "cards.txt").exists() and (tmp_path / "cards.txt").read_text().strip())
+    assert (tmp_path / "cards.txt").read_text().split() == ["0,4", "--teacher-device", "cuda:1"]
+    state = json.loads((tmp_path / "state/state.json").read_text())
+    assert state["jobs"]["C"]["gpus"] == [0, 4] and q.taken_gpus(state) == {0, 4}
+    q.main(["yield", "--queue", str(queue_path), "--gpu", "4", "--hold-minutes", "5"])   # the second card counts too
+    state = json.loads((tmp_path / "state/state.json").read_text())
+    assert state["jobs"]["C"]["status"] == "pending" and set(state["holds"]) == {"0", "4"}

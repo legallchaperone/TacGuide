@@ -1,38 +1,18 @@
 {
-  "_comment": "Grasp Chip task queue (plan section 任务队列). Paths are relative to cwd. Lower priority number runs first. Training A and B is launched by whoever owns phase 3; flip `enabled` to hand them to the scheduler. chosen_w.txt holds the w picked in phase 4 (e.g. `2` or `1.5`). A first launch uses --overwrite because the trainer refuses an existing run directory; once a checkpoint exists the resume command is used instead. C and D save every 1000 steps and keep the two newest checkpoints plus the final one.",
-  "cwd": "$HOME/TacGuide",
+  "_comment": "Grasp Chip queue for the distilled students (plan section 任务队列). gc_A and gc_B are trained and resumed by the watch_ab watcher, not from here. Paths are relative to cwd; lower priority number runs first. chosen_w.txt holds the w picked in stage 4 (e.g. `2` or `1.5`). Memory figures come from the batch-64 test: student card 53 GB reserved, both teachers 31 GB reserved. A job first looks for one card with enough room for everything, otherwise it puts the student on one card and the frozen teachers on a second. Cards 5 and 7 are left to gc_B and gc_A; a card that already runs a TacGuide process is never shared. First launch uses --overwrite because the trainer refuses an existing run directory; once a checkpoint exists the resume command is used. Checkpoints every 1000 steps, the two newest plus the final one are kept.",
+  "cwd": "$HOME/TacGuide-distill",
   "state_dir": "$TG/queue",
   "log_dir": "$TG/queue/logs",
+  "allowed_gpus": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    6
+  ],
+  "own_marker": "TacGuide",
   "jobs": [
-    {
-      "name": "train_gc_A",
-      "enabled": false,
-      "priority": 1,
-      "requires": [
-        "data/training/lerobot/gc",
-        "data/training/stats/openvtla/gc/norm_stats.json",
-        "weights/anytouch2/checkpoint-4frames.pth",
-        "weights/pi05_base_pytorch/model.safetensors"
-      ],
-      "cmd": "training/tacguide.sh train gc_A {gpu} --overwrite",
-      "resume_if": "outputs/training/openvtla/gc/gc_A/[0-9]*/model.safetensors",
-      "resume_cmd": "training/tacguide.sh train gc_A {gpu} --resume",
-      "done_if": "outputs/training/openvtla/gc/gc_A/10000/model.safetensors"
-    },
-    {
-      "name": "train_gc_B",
-      "enabled": false,
-      "priority": 1,
-      "requires": [
-        "data/training/lerobot/gc",
-        "data/training/stats/pi05/gc/norm_stats.json",
-        "weights/pi05_base_pytorch/model.safetensors"
-      ],
-      "cmd": "training/tacguide.sh train gc_B {gpu} --overwrite",
-      "resume_if": "outputs/training/pi05/gc/gc_B/[0-9]*/model.safetensors",
-      "resume_cmd": "training/tacguide.sh train gc_B {gpu} --resume",
-      "done_if": "outputs/training/pi05/gc/gc_B/10000/model.safetensors"
-    },
     {
       "name": "train_gc_D",
       "priority": 3,
@@ -44,9 +24,23 @@
         "outputs/training/pi05/gc/gc_B/10000/model.safetensors",
         "training/tacguide/train_distill.py"
       ],
-      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --overwrite --save-interval 1000",
+      "placements": [
+        {
+          "min_free_mib": [
+            90000
+          ]
+        },
+        {
+          "min_free_mib": [
+            55000,
+            33000
+          ],
+          "args": "--teacher-device cuda:1"
+        }
+      ],
+      "cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --overwrite --save-interval 1000 {placement_args}",
       "resume_if": "outputs/training/pi05/gc/gc_D_w{w}/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --resume --save-interval 1000",
+      "resume_cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --resume --save-interval 1000 {placement_args}",
       "done_if": "outputs/training/pi05/gc/gc_D_w{w}/10000/model.safetensors"
     },
     {
@@ -56,9 +50,23 @@
         "outputs/training/openvtla/gc/gc_A/10000/model.safetensors",
         "training/tacguide/train_distill.py"
       ],
-      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_C --overwrite --save-interval 1000",
+      "placements": [
+        {
+          "min_free_mib": [
+            76000
+          ]
+        },
+        {
+          "min_free_mib": [
+            55000,
+            20000
+          ],
+          "args": "--teacher-device cuda:1"
+        }
+      ],
+      "cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_C --overwrite --save-interval 1000 {placement_args}",
       "resume_if": "outputs/training/pi05/gc/gc_C/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_C --resume --save-interval 1000",
+      "resume_cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_C --resume --save-interval 1000 {placement_args}",
       "done_if": "outputs/training/pi05/gc/gc_C/10000/model.safetensors"
     },
     {
@@ -69,9 +77,23 @@
         "outputs/training/pi05/gc/gc_B/10000/model.safetensors",
         "training/tacguide/train_distill.py"
       ],
-      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --overwrite --save-interval 1000",
+      "placements": [
+        {
+          "min_free_mib": [
+            90000
+          ]
+        },
+        {
+          "min_free_mib": [
+            55000,
+            33000
+          ],
+          "args": "--teacher-device cuda:1"
+        }
+      ],
+      "cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --overwrite --save-interval 1000 {placement_args}",
       "resume_if": "outputs/training/pi05/gc/gc_D_w2/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --resume --save-interval 1000",
+      "resume_cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --resume --save-interval 1000 {placement_args}",
       "done_if": "outputs/training/pi05/gc/gc_D_w2/10000/model.safetensors",
       "enabled": false
     }

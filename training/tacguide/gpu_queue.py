@@ -12,8 +12,10 @@ jobs run one after another.
     python3 training/tacguide/gpu_queue.py yield --queue ... --job train_gc_C
 
 Rules it enforces:
-  * A card is free only if its memory use is near zero AND no compute process is on
-    it, and it must still be free on a second look just before launch.
+  * By default a card is free only if its memory use is near zero AND no compute
+    process is on it. A job with `placements` may instead share cards that have
+    enough memory left, never a card that already runs one of the project's own jobs.
+  * The choice must come out the same on a second look just before launch.
   * It only ever signals processes it started itself.
   * A job that exits without its `done_if` file is restarted (with `resume_cmd` once
     `resume_if` exists) up to `max_attempts` times.
@@ -24,8 +26,12 @@ Queue file (JSON):
   {"state_dir": "...", "log_dir": "...", "cwd": "...",
    "jobs": [{"name": "...", "priority": 1, "cmd": "...", "resume_cmd": "...",
              "resume_if": "glob", "requires": ["glob", ...], "done_if": "glob",
-             "vars_from": {"w": "file"}, "enabled": true, "max_attempts": 5}]}
-Strings may use {name} placeholders (variables from `vars_from`, plus {gpu}) and
+             "vars_from": {"w": "file"}, "enabled": true, "max_attempts": 5,
+             "placements": [{"min_free_mib": [90000]},
+                            {"min_free_mib": [55000, 22000], "args": "--teacher-device cuda:1"}]}],
+   "allowed_gpus": [0, 2, 4, 6], "own_marker": "TacGuide"}
+Strings may use {name} placeholders (variables from `vars_from`, plus {gpu} and
+{placement_args}) and
 $ENV variables. A job whose variable file does not exist yet is not ready.
 """
 
@@ -46,7 +52,11 @@ import time
 
 FREE_MEMORY_MIB = 500  # "near zero": an idle card reports a few MiB
 CONFIRM_SECONDS = 20
-GPU_QUERY = ["nvidia-smi", "--query-gpu=index,uuid,memory.used,utilization.gpu", "--format=csv,noheader,nounits"]
+GPU_QUERY = [
+    "nvidia-smi",
+    "--query-gpu=index,uuid,memory.used,utilization.gpu,memory.total",
+    "--format=csv,noheader,nounits",
+]
 APP_QUERY = ["nvidia-smi", "--query-compute-apps=gpu_uuid,pid,used_memory", "--format=csv,noheader,nounits"]
 
 
@@ -57,6 +67,11 @@ class Gpu:
     memory_used_mib: int
     utilization: int
     pids: tuple[int, ...] = ()
+    memory_total_mib: int = 0
+
+    @property
+    def memory_free_mib(self) -> int:
+        return max(self.memory_total_mib - self.memory_used_mib, 0)
 
 
 def parse_nvidia_smi(gpu_csv: str, app_csv: str) -> list[Gpu]:
@@ -72,7 +87,8 @@ def parse_nvidia_smi(gpu_csv: str, app_csv: str) -> list[Gpu]:
             continue
         utilization = int(parts[3]) if parts[3].isdigit() else 100  # unreadable counts as busy
         memory = int(parts[2]) if parts[2].isdigit() else 10**9
-        gpus.append(Gpu(int(parts[0]), parts[1], memory, utilization, tuple(apps.get(parts[1], ()))))
+        total = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0
+        gpus.append(Gpu(int(parts[0]), parts[1], memory, utilization, tuple(apps.get(parts[1], ())), total))
     return gpus
 
 
@@ -139,17 +155,68 @@ def missing_requirements(job: dict, cwd: str) -> list[str]:
     return [pattern for pattern in job.get("requires", []) if not _matches(pattern, cwd, variables)]
 
 
-def command_for(job: dict, cwd: str, gpu: int) -> str:
-    variables = {**(job_variables(job, cwd) or {}), "gpu": gpu}
+def command_for(job: dict, cwd: str, gpu: int, placement_args: str = "") -> str:
+    variables = {**(job_variables(job, cwd) or {}), "gpu": gpu, "placement_args": placement_args}
     resume = "resume_cmd" in job and "resume_if" in job and _matches(job["resume_if"], cwd, variables)
     # Only placeholders are filled in here; $VARIABLES are left for bash, which runs the
-    # command with CUDA_VISIBLE_DEVICES already set to the assigned card.
+    # command with CUDA_VISIBLE_DEVICES already set to the assigned card(s).
     return (job["resume_cmd"] if resume else job["cmd"]).format(**variables)
 
 
-def plan(queue: dict, state: dict, free_gpus: list[int]) -> list[tuple[str, int]]:
-    """Pure decision: which pending jobs go on which free cards, best priority first."""
+@dataclasses.dataclass(frozen=True)
+class Assignment:
+    name: str
+    gpus: tuple[int, ...]
+    args: str = ""
+
+
+def process_command_line(pid: int) -> str:
+    try:
+        return pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+    except OSError:
+        return ""
+
+
+def place(job: dict, queue: dict, gpus: list[Gpu], cmdline_of=process_command_line) -> tuple[tuple[int, ...], str] | None:
+    """Pick cards for a job from the cards still available, or None if it does not fit now.
+
+    Without `placements` a job takes one completely empty card. With `placements`
+    (tried in order) each entry lists the free memory needed on each card, e.g.
+    {"min_free_mib": [55000, 22000], "args": "--teacher-device cuda:1"}; a card that
+    someone else is using counts if enough memory is left on it, unless one of the
+    project's own processes (queue key `own_marker`) is already there.
+    """
+    allowed = queue.get("allowed_gpus")
+    marker = queue.get("own_marker")
+    cards = [gpu for gpu in gpus if allowed is None or gpu.index in allowed]
+    for placement in job.get("placements") or [{}]:
+        needs = placement.get("min_free_mib")
+        if not needs:
+            empty = [g for g in cards if not g.pids and g.memory_used_mib <= FREE_MEMORY_MIB]
+            if empty:
+                return (empty[0].index,), placement.get("args", "")
+            continue
+        shareable = [g for g in cards if not (marker and any(marker in cmdline_of(pid) for pid in g.pids))]
+        chosen: dict[int, int] = {}
+        # Largest demand first, each on the tightest card that still fits it.
+        for slot in sorted(range(len(needs)), key=lambda i: -needs[i]):
+            fitting = [g for g in shareable if g.index not in chosen.values() and g.memory_free_mib >= needs[slot]]
+            if not fitting:
+                break
+            chosen[slot] = min(fitting, key=lambda g: (g.memory_free_mib, g.index)).index
+        if len(chosen) == len(needs):
+            return tuple(chosen[i] for i in range(len(needs))), placement.get("args", "")
+    return None
+
+
+def plan(queue: dict, state: dict, gpus, cmdline_of=process_command_line) -> list[Assignment]:
+    """Pure decision: which pending jobs go on which cards, best priority first.
+
+    `gpus` are the cards not already taken or held back (Gpu objects; bare indices
+    are read as completely empty cards).
+    """
     cwd = queue["cwd"]
+    available = [g if isinstance(g, Gpu) else Gpu(g, f"GPU-{g}", 0, 0, (), 10**6) for g in gpus]
     ready = []
     for position, job in enumerate(queue["jobs"]):
         record = state["jobs"].get(job["name"], {})
@@ -157,8 +224,16 @@ def plan(queue: dict, state: dict, free_gpus: list[int]) -> list[tuple[str, int]
             continue
         if job_is_done(job, cwd) or missing_requirements(job, cwd):
             continue
-        ready.append((job.get("priority", 100), position, job["name"]))
-    return [(name, gpu) for (_, _, name), gpu in zip(sorted(ready), sorted(free_gpus))]
+        ready.append((job.get("priority", 100), position, job))
+    assignments = []
+    for _, _, job in sorted(ready, key=lambda item: item[:2]):
+        placed = place(job, queue, sorted(available, key=lambda g: g.index), cmdline_of)
+        if placed is None:
+            continue
+        cards, args = placed
+        assignments.append(Assignment(job["name"], cards, args))
+        available = [g for g in available if g.index not in cards]
+    return assignments
 
 
 # ---------------------------------------------------------------- state
@@ -236,23 +311,35 @@ def reap(queue: dict, state: dict, log=print) -> None:
     state["holds"] = {gpu: until for gpu, until in state["holds"].items() if until > now}
 
 
+def record_gpus(record: dict) -> list[int]:
+    return list(record.get("gpus") or ([record["gpu"]] if record.get("gpu") is not None else []))
+
+
 def taken_gpus(state: dict) -> set[int]:
-    return {record["gpu"] for record in state["jobs"].values() if record.get("status") == "running"}
+    return {gpu for record in state["jobs"].values() if record.get("status") == "running" for gpu in record_gpus(record)}
+
+
+def available_gpus(gpus: list[Gpu], state: dict) -> list[Gpu]:
+    blocked = taken_gpus(state) | held_gpus(state)
+    return [gpu for gpu in gpus if gpu.index not in blocked]
 
 
 def held_gpus(state: dict) -> set[int]:
     return {int(gpu) for gpu in state["holds"]}
 
 
-def launch(queue: dict, state: dict, name: str, gpu: int, log=print) -> None:
+def launch(queue: dict, state: dict, name: str, gpu, log=print, args: str = "") -> None:
     job = next(job for job in queue["jobs"] if job["name"] == name)
-    command = command_for(job, queue["cwd"], gpu)
+    cards = tuple(gpu) if isinstance(gpu, (tuple, list)) else (gpu,)
+    gpu = cards[0]
+    visible = ",".join(str(card) for card in cards)
+    command = command_for(job, queue["cwd"], gpu, args)
     log_dir = pathlib.Path(queue["log_dir"])
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{name}.{time.strftime('%Y%m%d-%H%M%S')}.log"
-    environment = {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu)}
+    environment = {**os.environ, "CUDA_VISIBLE_DEVICES": visible}
     with open(log_path, "ab") as output:
-        output.write(f"# gpu {gpu}: {command}\n".encode())
+        output.write(f"# gpu {visible}: {command}\n".encode())
         output.flush()
         process = subprocess.Popen(  # noqa: S602 - the queue file is ours
             ["bash", "-c", command],
@@ -269,11 +356,12 @@ def launch(queue: dict, state: dict, name: str, gpu: int, log=print) -> None:
         pid=process.pid,
         start_ticks=_start_ticks(process.pid),
         gpu=gpu,
+        gpus=list(cards),
         log=str(log_path),
         command=command,
         started_at=time.time(),
     )
-    log(f"{name}: started on gpu {gpu}, pid {process.pid}, log {log_path}")
+    log(f"{name}: started on gpu {visible}, pid {process.pid}, log {log_path}")
 
 
 def stop_job(record: dict, grace_seconds: float = 30.0) -> None:
@@ -298,32 +386,32 @@ def stop_job(record: dict, grace_seconds: float = 30.0) -> None:
 # ---------------------------------------------------------------- commands
 
 
-def tick(queue, *, read=read_gpus, dry_run=False, confirm_seconds=CONFIRM_SECONDS, log=print) -> list[tuple[str, int]]:
-    """One scheduling round. Returns the (job, gpu) pairs that were started (or would be)."""
+def tick(queue, *, read=read_gpus, dry_run=False, confirm_seconds=CONFIRM_SECONDS, log=print, cmdline_of=process_command_line):
+    """One scheduling round. Returns the (job, first gpu) pairs that were started (or would be)."""
     with contextlib.suppress(ChildProcessError):
         while os.waitpid(-1, os.WNOHANG)[0]:
             pass
+    jobs = {job["name"]: job for job in queue["jobs"]}
     with locked_state(queue) as state:
         reap(queue, state, log)
-        free = free_gpu_indices(read(), taken=taken_gpus(state), held=held_gpus(state))
-        candidates = plan(queue, state, free)
+        candidates = plan(queue, state, available_gpus(read(), state), cmdline_of)
     if dry_run:
-        for name, gpu in candidates:
-            job = next(job for job in queue["jobs"] if job["name"] == name)
-            log(f"would start {name} on gpu {gpu}: {command_for(job, queue['cwd'], gpu)}")
+        for item in candidates:
+            command = command_for(jobs[item.name], queue["cwd"], item.gpus[0], item.args)
+            log(f"would start {item.name} on gpu {','.join(map(str, item.gpus))}: {command}")
         if not candidates:
-            log(f"nothing to start (free cards: {free or 'none'})")
-        return candidates
+            log("nothing to start")
+        return [(item.name, item.gpus[0]) for item in candidates]
     if not candidates:
         return []
     time.sleep(confirm_seconds)  # look again before taking a card: someone may have just started on it
     started = []
     with locked_state(queue) as state:
         reap(queue, state, log)
-        still_free = free_gpu_indices(read(), taken=taken_gpus(state), held=held_gpus(state))
-        for name, gpu in plan(queue, state, [gpu for _, gpu in candidates if gpu in still_free]):
-            launch(queue, state, name, gpu, log)
-            started.append((name, gpu))
+        for item in plan(queue, state, available_gpus(read(), state), cmdline_of):
+            if item in candidates:  # same job on the same cards in both looks
+                launch(queue, state, item.name, item.gpus, log, item.args)
+                started.append((item.name, item.gpus[0]))
     return started
 
 
@@ -367,7 +455,7 @@ def command_status(queue, args):
             status = "disabled"
         elif status == "running":
             hours = (time.time() - record["started_at"]) / 3600
-            detail = f"gpu {record['gpu']}, pid {record['pid']}, {hours:.1f} h, {record['log']}"
+            detail = f"gpu {','.join(map(str, record_gpus(record)))}, pid {record['pid']}, {hours:.1f} h, {record['log']}"
         elif status == "pending":
             missing = missing_requirements(job, cwd)
             detail = "ready" if not missing else "waiting for " + ", ".join(missing)
@@ -375,8 +463,8 @@ def command_status(queue, args):
             detail = f"see {record.get('log')}"
         print(f"{job.get('priority', 100):>5}  {job['name']:<24} {status:<9} {detail}")
     if gpus:
-        free = free_gpu_indices(gpus, taken={r["gpu"] for r in records.values() if r.get("status") == "running"})
-        print(f"free cards: {free or 'none'}   held back: {sorted(int(g) for g in holds) or 'none'}")
+        free = ", ".join(f"{g.index}: {g.memory_free_mib // 1024} GB" for g in gpus)
+        print(f"free memory per card: {free}   held back: {sorted(int(g) for g in holds) or 'none'}")
 
 
 def command_yield(queue, args):
@@ -385,9 +473,9 @@ def command_yield(queue, args):
             (name, record)
             for name, record in state["jobs"].items()
             if record.get("status") == "running"
-            and ((args.job and name == args.job) or (args.gpu is not None and record.get("gpu") == args.gpu))
+            and ((args.job and name == args.job) or (args.gpu is not None and args.gpu in record_gpus(record)))
         ]
-        gpus = {record["gpu"] for _, record in targets}
+        gpus = {gpu for _, record in targets for gpu in record_gpus(record)}
         if args.gpu is not None:
             gpus.add(args.gpu)
         for gpu in gpus:
@@ -395,7 +483,7 @@ def command_yield(queue, args):
         for name, record in targets:
             stop_job(record)
             record.update(status="pending", pid=None, ended_at=time.time())  # not counted as a failed attempt
-            print(f"{name}: stopped, gpu {record['gpu']} released; it will resume on another free card")
+            print(f"{name}: stopped, gpu {record_gpus(record)} released; it will resume when cards are free")
         if not targets:
             print("no running job matched; the card is held back anyway" if gpus else "no running job matched")
         if gpus:
