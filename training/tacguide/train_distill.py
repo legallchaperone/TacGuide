@@ -54,6 +54,7 @@ def parse_args(argv=None):
     parser.add_argument("--steps", type=int, help="override the number of training steps (tests only)")
     parser.add_argument("--batch-size", type=int, help="override the batch size (tests only)")
     parser.add_argument("--save-interval", type=int, help="override the checkpoint interval")
+    parser.add_argument("--keep-last", type=int, default=2, help="checkpoints to keep besides the final one; 0 keeps all")
     parser.add_argument("--no-save", action="store_true", help="do not write checkpoints (tests only)")
     parser.add_argument("--no-wandb", action="store_true")
     parser.add_argument("--summary", help="write a JSON summary (hashes, peak memory) to this path")
@@ -100,6 +101,18 @@ def resolve_teacher_dir(explicit, train_config, *, allow_partial: bool, base_sta
             f"{train_config.num_train_steps}; wait for it to finish or pass --allow-partial-teacher"
         )
     return latest
+
+
+def prune_checkpoints(checkpoint_dir, *, keep_last: int, final_step: int) -> list[int]:
+    """Delete this run's older step directories, keeping the newest `keep_last` and the final one."""
+    import shutil
+
+    checkpoint_dir = pathlib.Path(checkpoint_dir)
+    steps = sorted(int(d.name) for d in checkpoint_dir.iterdir() if d.is_dir() and d.name.isdigit())
+    removed = [step for step in steps if step != final_step][:-keep_last]
+    for step in removed:
+        shutil.rmtree(checkpoint_dir / str(step))
+    return removed
 
 
 def check_norm_stats(student_config, teacher_configs_and_dirs):
@@ -221,6 +234,8 @@ def main(argv=None):
             verify_teachers(f"step {global_step}")
         if not args.no_save:
             original_save(model, optimizer, global_step, cfg, is_main, data_config)
+            if saving and is_main and args.keep_last > 0:
+                prune_checkpoints(cfg.checkpoint_dir, keep_last=args.keep_last, final_step=cfg.num_train_steps)
 
     original_class = pi0_pytorch.PI0Pytorch
     pi0_pytorch.PI0Pytorch = make_student

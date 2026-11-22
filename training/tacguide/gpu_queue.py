@@ -107,6 +107,8 @@ def load_queue(path) -> dict:
     queue.setdefault("cwd", str(pathlib.Path.cwd()))
     for key in ("cwd", "state_dir", "log_dir"):
         queue[key] = os.path.expandvars(queue[key])
+        if "$" in queue[key]:
+            raise ValueError(f"{key} = {queue[key]!r} has an unset variable; run `source training/tacguide_env.sh` first")
     return queue
 
 

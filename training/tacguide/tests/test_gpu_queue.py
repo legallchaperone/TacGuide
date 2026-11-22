@@ -143,3 +143,13 @@ def test_shipped_queue_file_is_valid():
     assert {"train_gc_A", "train_gc_B", "train_gc_C", "train_gc_D"} <= set(names)
     for job in queue["jobs"]:
         assert {"cmd", "resume_cmd", "resume_if", "done_if", "priority"} <= set(job)
+
+
+def test_unset_variable_in_paths_is_refused(tmp_path, monkeypatch):
+    import pytest
+
+    monkeypatch.delenv("TG_UNSET_FOR_TEST", raising=False)
+    path = tmp_path / "queue.json"
+    path.write_text(json.dumps({"cwd": str(tmp_path), "state_dir": "$TG_UNSET_FOR_TEST/queue", "log_dir": str(tmp_path), "jobs": []}))
+    with pytest.raises(ValueError):
+        q.load_queue(path)
