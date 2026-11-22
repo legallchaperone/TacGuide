@@ -1,0 +1,103 @@
+"""Policy server for guided inference (plan item 2.6).
+
+    # CFG(A, B): the client must send tactile, use the vision+tactile deploy config
+    uv run --project training/openpi_runtime python training/tacguide/serve_guided.py \
+        --strong gc_A --weak gc_B --w 2 --port 8000
+
+    # zero-training extrapolation: no tactile, use the vision deploy config
+    uv run --project training/openpi_runtime python training/tacguide/serve_guided.py \
+        --strong gc_C --weak gc_B --w 2 --port 8000
+
+    # a single model behind the same seeded-noise wrapper (for like-for-like comparisons)
+    uv run --project training/openpi_runtime python training/tacguide/serve_guided.py --strong gc_A --port 8000
+
+Each side defaults to the latest checkpoint of its run (``--strong-exp``, ``--weak-exp``),
+or takes a directory (``--strong-dir``, ``--weak-dir``). With ``--seed`` (default 0) the
+k-th action request of an episode always gets the same initial noise, so
+"guided with w = 1" and "strong model alone" can be compared episode by episode.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import pathlib
+import sys
+
+_TRAINING_DIR = pathlib.Path(__file__).resolve().parents[1]
+if str(_TRAINING_DIR) not in sys.path:
+    sys.path.insert(0, str(_TRAINING_DIR))
+
+logger = logging.getLogger("tacguide")
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--strong", required=True, help="experiment name of the strong model, e.g. gc_A or gc_C")
+    parser.add_argument("--weak", help="experiment name of the weak model, e.g. gc_B; omit to serve --strong alone")
+    parser.add_argument("--w", type=float, help="guidance weight; required with --weak")
+    parser.add_argument("--strong-exp", default="run1")
+    parser.add_argument("--weak-exp", default="run1")
+    parser.add_argument("--strong-dir")
+    parser.add_argument("--weak-dir")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--seed", type=int, default=0, help="noise seed; -1 leaves the noise unseeded")
+    args = parser.parse_args(argv)
+    if (args.weak is None) != (args.w is None):
+        parser.error("--weak and --w go together")
+    return args
+
+
+def checkpoint_for(name, exp_name, explicit):
+    from tacguide import configs
+
+    if explicit:
+        return pathlib.Path(explicit)
+    experiment = configs.parse_name(name)
+    if experiment.is_student:
+        config = configs.student_config(name, exp_name=exp_name, wandb=False)
+    else:
+        config = configs.base_config(name, exp_name=exp_name)
+    latest = configs.latest_checkpoint(config.checkpoint_dir)
+    if latest is None:
+        raise FileNotFoundError(f"no checkpoint under {config.checkpoint_dir}")
+    return latest
+
+
+def build_policy(args):
+    from tacguide import configs
+    from tacguide.guided import GuidedPolicy, SeededNoisePolicy
+
+    strong_dir = checkpoint_for(args.strong, args.strong_exp, args.strong_dir)
+    logger.info("strong: %s from %s", args.strong, strong_dir)
+    policy, strong_stats = configs.create_policy(args.strong, strong_dir, exp_name=args.strong_exp)
+    description = {"strong": args.strong, "strong_checkpoint": str(strong_dir)}
+    if args.weak is not None:
+        weak_dir = checkpoint_for(args.weak, args.weak_exp, args.weak_dir)
+        logger.info("weak: %s from %s, w = %s", args.weak, weak_dir, args.w)
+        weak, weak_stats = configs.create_policy(args.weak, weak_dir, exp_name=args.weak_exp)
+        policy = GuidedPolicy(policy, weak, w=args.w, strong_norm_stats=strong_stats, weak_norm_stats=weak_stats)
+        description.update({"weak": args.weak, "weak_checkpoint": str(weak_dir), "w": args.w})
+    if args.seed >= 0:
+        policy = SeededNoisePolicy(policy, seed=args.seed)
+        description["noise_seed"] = args.seed
+    return policy, description
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    logging.basicConfig(level=logging.INFO, force=True)
+
+    from openpi.serving import websocket_policy_server
+
+    policy, description = build_policy(args)
+    metadata = {**(getattr(policy, "metadata", None) or {}), "tacguide": description}
+    logger.info("serving %s on %s:%d", description, args.host, args.port)
+    websocket_policy_server.WebsocketPolicyServer(
+        policy=policy, host=args.host, port=args.port, metadata=metadata
+    ).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
