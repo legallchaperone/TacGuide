@@ -21,6 +21,11 @@ _TRAINING_DIR = pathlib.Path(__file__).resolve().parents[1]
 if str(_TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(_TRAINING_DIR))
 
+# training/run.py points HF_LEROBOT_HOME at data/training/lerobot when it is imported.
+# lerobot reads that variable once, at its own import, so `run` has to come first:
+# every entry point imports this module before anything from openpi.
+import run  # noqa: E402
+
 WANDB_PROJECT = "TacGuide"
 BASE_MODELS = {"A": "openvtla", "B": "pi05"}
 _NAME = re.compile(r"^(?P<task>[a-z0-9_]+?)_(?P<kind>A|B|C|D_w(?P<w>\d+(?:\.\d+)?))$")
@@ -56,8 +61,6 @@ def base_config(name: str, *, exp_name: str | None = None, resume: bool = False,
     Runs live in outputs/training/<model>/<task>/<exp_name>; the run is named after
     the experiment unless `exp_name` says otherwise.
     """
-    import run  # training/run.py; also sets HF_LEROBOT_HOME and the runtime script path
-
     experiment = parse_name(name)
     if experiment.is_student:
         raise ValueError(f"{name} is a distilled student; use student_config()")
