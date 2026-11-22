@@ -41,6 +41,7 @@ checkpoints, served with the `gc_B` config. Details that matter:
   checkpoint save and at the end.
 - The target is computed as `(1 − w)·v_B + w·v_A`, the same value written so that
   w = 1 and w = 0 are exact in floating point.
+- wandb is off unless `--wandb` is passed; the loss is logged to stdout every 100 steps.
 - The runtime's PyTorch trainer has no EMA, so there is no EMA to switch off. If
   memory is short, `--teacher-device cuda:1` moves the teachers to a second card.
 

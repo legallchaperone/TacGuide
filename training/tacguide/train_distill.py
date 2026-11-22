@@ -56,7 +56,8 @@ def parse_args(argv=None):
     parser.add_argument("--save-interval", type=int, help="override the checkpoint interval")
     parser.add_argument("--keep-last", type=int, default=2, help="checkpoints to keep besides the final one; 0 keeps all")
     parser.add_argument("--no-save", action="store_true", help="do not write checkpoints (tests only)")
-    parser.add_argument("--no-wandb", action="store_true")
+    parser.add_argument("--wandb", action="store_true", help="log to the TacGuide wandb project (off by default; logs go to stdout)")
+    parser.add_argument("--no-wandb", action="store_true", help=argparse.SUPPRESS)  # accepted for older command lines
     parser.add_argument("--summary", help="write a JSON summary (hashes, peak memory) to this path")
     return parser.parse_args(argv)
 
@@ -163,7 +164,7 @@ def main(argv=None):
         resume=args.resume,
         overwrite=args.overwrite,
         num_workers=args.num_workers,
-        wandb=not args.no_wandb,
+        wandb=args.wandb and not args.no_wandb,
     )
     overrides = {}
     if args.steps is not None:
