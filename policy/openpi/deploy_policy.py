@@ -213,6 +213,10 @@ class Policy(BasePolicy):
         if self.tactile_history is not None:
             # Must run on every step, not only on the steps that query the server.
             obs = self.tactile_history.push(obs)
+        if self._policy_step_index == 0:
+            # First observation of an episode: lets the server restart per-episode state
+            # (for example its noise seed). Servers that do not use it ignore the key.
+            obs["reset"] = True
         if self.temporal_ensemble:
             action = self._temporal_ensemble_action(obs, task)
         else:

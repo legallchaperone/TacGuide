@@ -3,7 +3,7 @@
 #
 #   training/tacguide.sh prep  <dir with the collected .hdf5 episodes>   # link data, convert, stats
 #   training/tacguide.sh smoke gc_A|gc_B <gpu>                           # 10 steps, batch 64, no wandb
-#   training/tacguide.sh train gc_A|gc_B <gpu> [--resume]                # full run, wandb project TacGuide
+#   training/tacguide.sh train gc_A|gc_B <gpu> [--resume]                # full run; TG_WANDB=1 logs to wandb project TacGuide
 #   training/tacguide.sh serve gc_A|gc_B <gpu> [port] [step]             # policy server for evaluation
 #
 # gc_A = OpenVTLA (vision + touch), gc_B = π0.5 (vision only), both on Grasp Chip.
@@ -46,7 +46,7 @@ case "$cmd" in
   train)
     exp="${1:?gc_A or gc_B}"; gpu="${2:?gpu index}"; shift 2
     CUDA_VISIBLE_DEVICES="$gpu" "$PY" training/run.py train --task "$TASK" --model "$(model_for "$exp")" \
-      --exp-name "$exp" --steps "$STEPS" --save-interval "$SAVE_INTERVAL" --wandb "$@"
+      --exp-name "$exp" --steps "$STEPS" --save-interval "$SAVE_INTERVAL" ${TG_WANDB:+--wandb} "$@"
     ;;
   serve)
     exp="${1:?gc_A or gc_B}"; gpu="${2:?gpu index}"; port="${3:-8000}"; step="${4:-}"
