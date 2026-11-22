@@ -53,8 +53,18 @@ class AnyTouch2TactileEncoder(nn.Module):
         self.register_buffer("std", std.view(1, 1, 3, 1, 1), persistent=False)
 
         self.to(dtype=dtype)
-        if not trainable:
-            self.requires_grad_(requires_grad=False)
+        # Freezing covers the pretrained encoder only. The projector is new and randomly
+        # initialised, so it has to keep training or the tactile tokens stay noise.
+        self.trainable = bool(trainable)
+        if not self.trainable:
+            self.encoder.requires_grad_(requires_grad=False)
+            self.encoder.eval()
+
+    def train(self, mode: bool = True):  # noqa: FBT001, FBT002
+        super().train(mode)
+        if not self.trainable:
+            self.encoder.eval()
+        return self
 
     def _prepare_clip(self, clip: torch.Tensor) -> torch.Tensor:
         if clip.ndim != 5:

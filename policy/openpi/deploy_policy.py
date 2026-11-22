@@ -6,6 +6,7 @@ import torch
 from .._base_policy import BasePolicy
 from .client import OpenPiClientRuntime, OpenPiServerConfig
 from .debug import save_openpi_observation_images
+from .tactile_history import TactileHistory
 from .transforms import (
     openpi_obs_from_openvitac,
     relative_joint_chunk_to_abs_qpos8,
@@ -99,6 +100,14 @@ class Policy(BasePolicy):
         if self.image_color_order not in ("rgb", "bgr"):
             raise ValueError(f"image_color_order 只支持 'rgb' 或 'bgr'，实际为 {self.image_color_order!r}")
         self.open_loop_horizon = max(1, int(openpi_cfg.get("open_loop_horizon", 20)))
+        # OpenVTLA expects 4-frame tactile clips. Set e.g. tactile_history_offsets: [-6, -4, -2, 0]
+        # to assemble them here; leave unset to send single tactile frames as before.
+        tactile_history_offsets = openpi_cfg.get("tactile_history_offsets", None)
+        self.tactile_history = None
+        if tactile_history_offsets:
+            if not self.send_tactile:
+                raise ValueError("openpi.tactile_history_offsets 需要 send_tactile: true")
+            self.tactile_history = TactileHistory(tactile_history_offsets)
         self.debug_dump_first_n_obs = max(0, int(openpi_cfg.get("debug_dump_first_n_obs", 0)))
         self.debug_dump_dir = str(openpi_cfg.get("debug_dump_dir", "debug/openpi_obs"))
         self.max_position_delta = _optional_float(openpi_cfg.get("max_position_delta", None))
@@ -201,6 +210,9 @@ class Policy(BasePolicy):
             )
             print(f"OpenPI debug obs dump step={self._policy_step_index}: {saved_paths}")
 
+        if self.tactile_history is not None:
+            # Must run on every step, not only on the steps that query the server.
+            obs = self.tactile_history.push(obs)
         if self.temporal_ensemble:
             action = self._temporal_ensemble_action(obs, task)
         else:
@@ -417,6 +429,8 @@ class Policy(BasePolicy):
 
     def _clear_action_state(self) -> None:
         self._action_chunk = None
+        if getattr(self, "tactile_history", None) is not None:
+            self.tactile_history.reset()
         self._chunk_step = 0
         self._policy_step_index = 0
         self._action_predictions.clear()
