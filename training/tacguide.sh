@@ -12,7 +12,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/training/tacguide_env.sh"
 cd "$ROOT"
-TASK=gc
+TASK="${TG_TASK:-gc}"
 PY="$UV_PROJECT_ENVIRONMENT/bin/python"
 STEPS="${TG_STEPS:-10000}"
 SAVE_INTERVAL="${TG_SAVE_INTERVAL:-1000}"
