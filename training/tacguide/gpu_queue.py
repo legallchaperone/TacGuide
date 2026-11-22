@@ -142,7 +142,9 @@ def missing_requirements(job: dict, cwd: str) -> list[str]:
 def command_for(job: dict, cwd: str, gpu: int) -> str:
     variables = {**(job_variables(job, cwd) or {}), "gpu": gpu}
     resume = "resume_cmd" in job and "resume_if" in job and _matches(job["resume_if"], cwd, variables)
-    return _expand(job["resume_cmd"] if resume else job["cmd"], variables)
+    # Only placeholders are filled in here; $VARIABLES are left for bash, which runs the
+    # command with CUDA_VISIBLE_DEVICES already set to the assigned card.
+    return (job["resume_cmd"] if resume else job["cmd"]).format(**variables)
 
 
 def plan(queue: dict, state: dict, free_gpus: list[int]) -> list[tuple[str, int]]:
