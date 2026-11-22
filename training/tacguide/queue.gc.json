@@ -11,12 +11,13 @@
       "requires": [
         "data/training/lerobot/gc",
         "data/training/stats/openvtla/gc/norm_stats.json",
-        "weights/anytouch2/checkpoint-4frames.pth"
+        "weights/anytouch2/checkpoint-4frames.pth",
+        "weights/pi05_base_pytorch/model.safetensors"
       ],
-      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/run.py train --task gc --model openvtla --exp-name run1",
-      "resume_if": "outputs/training/openvtla/gc/run1/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/run.py train --task gc --model openvtla --exp-name run1 --resume",
-      "done_if": "outputs/training/openvtla/gc/run1/10000/model.safetensors"
+      "cmd": "training/tacguide.sh train gc_A {gpu} --overwrite",
+      "resume_if": "outputs/training/openvtla/gc/gc_A/[0-9]*/model.safetensors",
+      "resume_cmd": "training/tacguide.sh train gc_A {gpu} --resume",
+      "done_if": "outputs/training/openvtla/gc/gc_A/10000/model.safetensors"
     },
     {
       "name": "train_gc_B",
@@ -24,12 +25,13 @@
       "priority": 1,
       "requires": [
         "data/training/lerobot/gc",
-        "data/training/stats/pi05/gc/norm_stats.json"
+        "data/training/stats/pi05/gc/norm_stats.json",
+        "weights/pi05_base_pytorch/model.safetensors"
       ],
-      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/run.py train --task gc --model pi05 --exp-name run1",
-      "resume_if": "outputs/training/pi05/gc/run1/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/run.py train --task gc --model pi05 --exp-name run1 --resume",
-      "done_if": "outputs/training/pi05/gc/run1/10000/model.safetensors"
+      "cmd": "training/tacguide.sh train gc_B {gpu} --overwrite",
+      "resume_if": "outputs/training/pi05/gc/gc_B/[0-9]*/model.safetensors",
+      "resume_cmd": "training/tacguide.sh train gc_B {gpu} --resume",
+      "done_if": "outputs/training/pi05/gc/gc_B/10000/model.safetensors"
     },
     {
       "name": "train_gc_D",
@@ -38,40 +40,40 @@
         "w": "$TG/queue/chosen_w.txt"
       },
       "requires": [
-        "outputs/training/openvtla/gc/run1/10000/model.safetensors",
-        "outputs/training/pi05/gc/run1/10000/model.safetensors",
+        "outputs/training/openvtla/gc/gc_A/10000/model.safetensors",
+        "outputs/training/pi05/gc/gc_B/10000/model.safetensors",
         "training/tacguide/train_distill.py"
       ],
-      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --exp-name run1 --overwrite --save-interval 1000",
-      "resume_if": "outputs/training/gc_D_w{w}/run1/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --exp-name run1 --resume --save-interval 1000",
-      "done_if": "outputs/training/gc_D_w{w}/run1/10000/model.safetensors"
+      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --overwrite --save-interval 1000",
+      "resume_if": "outputs/training/pi05/gc/gc_D_w{w}/[0-9]*/model.safetensors",
+      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --resume --save-interval 1000",
+      "done_if": "outputs/training/pi05/gc/gc_D_w{w}/10000/model.safetensors"
     },
     {
       "name": "train_gc_C",
       "priority": 3.5,
       "requires": [
-        "outputs/training/openvtla/gc/run1/10000/model.safetensors",
+        "outputs/training/openvtla/gc/gc_A/10000/model.safetensors",
         "training/tacguide/train_distill.py"
       ],
-      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_C --exp-name run1 --overwrite --save-interval 1000",
-      "resume_if": "outputs/training/gc_C/run1/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_C --exp-name run1 --resume --save-interval 1000",
-      "done_if": "outputs/training/gc_C/run1/10000/model.safetensors"
+      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_C --overwrite --save-interval 1000",
+      "resume_if": "outputs/training/pi05/gc/gc_C/[0-9]*/model.safetensors",
+      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_C --resume --save-interval 1000",
+      "done_if": "outputs/training/pi05/gc/gc_C/10000/model.safetensors"
     },
     {
       "name": "train_gc_D_w2_extra",
-      "enabled": false,
       "priority": 5,
       "requires": [
-        "outputs/training/openvtla/gc/run1/10000/model.safetensors",
-        "outputs/training/pi05/gc/run1/10000/model.safetensors",
+        "outputs/training/openvtla/gc/gc_A/10000/model.safetensors",
+        "outputs/training/pi05/gc/gc_B/10000/model.safetensors",
         "training/tacguide/train_distill.py"
       ],
-      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --exp-name run1 --overwrite --save-interval 1000",
-      "resume_if": "outputs/training/gc_D_w2/run1/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --exp-name run1 --resume --save-interval 1000",
-      "done_if": "outputs/training/gc_D_w2/run1/10000/model.safetensors"
+      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --overwrite --save-interval 1000",
+      "resume_if": "outputs/training/pi05/gc/gc_D_w2/[0-9]*/model.safetensors",
+      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --resume --save-interval 1000",
+      "done_if": "outputs/training/pi05/gc/gc_D_w2/10000/model.safetensors",
+      "enabled": false
     }
   ]
 }

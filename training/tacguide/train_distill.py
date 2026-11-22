@@ -2,8 +2,8 @@
 
 From the repository root, on one GPU:
 
-    uv run --project training/openpi_runtime python training/tacguide/train_distill.py gc_C
-    uv run --project training/openpi_runtime python training/tacguide/train_distill.py gc_D_w2
+    $TG/venv/bin/python training/tacguide/train_distill.py gc_C
+    $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2
     ... --resume                  # continue from the student's latest checkpoint
 
 The teachers default to the latest checkpoint of gc_A / gc_B (``--teacher-exp``,
@@ -40,11 +40,11 @@ logger = logging.getLogger("tacguide")
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("name", help="gc_C or gc_D_w<number>, e.g. gc_D_w2")
-    parser.add_argument("--exp-name", default="run1")
+    parser.add_argument("--exp-name", help="run name; defaults to the experiment name")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--teacher-exp", default="run1", help="run name of gc_A")
-    parser.add_argument("--weak-exp", default="run1", help="run name of gc_B")
+    parser.add_argument("--teacher-exp", help="run name of gc_A (default gc_A)")
+    parser.add_argument("--weak-exp", help="run name of gc_B (default gc_B)")
     parser.add_argument("--teacher-dir", help="checkpoint directory of A (contains model.safetensors)")
     parser.add_argument("--weak-dir", help="checkpoint directory of B (contains model.safetensors)")
     parser.add_argument("--allow-partial-teacher", action="store_true", help="accept a teacher that is not at its final step")

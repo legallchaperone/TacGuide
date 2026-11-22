@@ -3,10 +3,10 @@
 This is the only file that knows how an experiment name maps onto the bundled
 training code, so a different registry for gc_A / gc_B only needs a change here.
 
-  gc_A        vision + tactile teacher   = official `--task gc --model openvtla`
-  gc_B        vision-only student        = official `--task gc --model pi05`
-  gc_C        distilled student, w = 1
-  gc_D_w<w>   extrapolated student, e.g. gc_D_w1.5, gc_D_w2
+  gc_A        vision + tactile teacher   outputs/training/openvtla/gc/gc_A
+  gc_B        vision-only student        outputs/training/pi05/gc/gc_B
+  gc_C        distilled student, w = 1   outputs/training/pi05/gc/gc_C
+  gc_D_w<w>   extrapolated student       outputs/training/pi05/gc/gc_D_w2, gc_D_w1.5, ...
 """
 
 from __future__ import annotations
@@ -50,8 +50,12 @@ def parse_name(name: str) -> Experiment:
     return Experiment(name, match["task"], kind, None)
 
 
-def base_config(name: str, *, exp_name: str = "run1", resume: bool = False, num_workers: int = 2):
-    """Training config of a teacher (gc_A) or the plain student (gc_B), as the official entry point builds it."""
+def base_config(name: str, *, exp_name: str | None = None, resume: bool = False, num_workers: int = 2):
+    """Training config of a teacher (gc_A) or the plain student (gc_B), as `training/run.py` builds it.
+
+    Runs live in outputs/training/<model>/<task>/<exp_name>; the run is named after
+    the experiment unless `exp_name` says otherwise.
+    """
     import run  # training/run.py; also sets HF_LEROBOT_HOME and the runtime script path
 
     experiment = parse_name(name)
@@ -60,7 +64,7 @@ def base_config(name: str, *, exp_name: str = "run1", resume: bool = False, num_
     args = argparse.Namespace(
         task=experiment.task,
         model=BASE_MODELS[experiment.kind],
-        exp_name=exp_name,
+        exp_name=exp_name or name,
         resume=resume,
         num_workers=num_workers,
     )
@@ -70,40 +74,45 @@ def base_config(name: str, *, exp_name: str = "run1", resume: bool = False, num_
 def student_config(
     name: str,
     *,
-    exp_name: str = "run1",
+    exp_name: str | None = None,
     resume: bool = False,
     overwrite: bool = False,
     num_workers: int = 2,
-    wandb: bool = True,
+    wandb: bool = False,
 ):
     """Config for gc_C / gc_D_w*.
 
-    Everything that defines the optimisation (steps, batch size, learning rate,
-    initial weights, model) is taken from gc_B, so the student always tracks B.
-    The data pipeline is gc_A's, because the frozen teacher needs the tactile clips;
-    the student and teacher B only ever see the camera images picked out of that batch.
+    A student is a vision-only pi0.5 run: it is gc_B's config under another run name
+    (outputs/training/pi05/<task>/<name>), so steps, batch size, learning rate, initial
+    weights and model always track B, and `training/serve.py --model pi05 --exp-name
+    <name>` serves it like any other vision-only run.
+    Only the data pipeline is gc_A's, because the frozen teacher needs the tactile
+    clips; the student and teacher B only ever see the camera images picked out of it.
     """
-    from openpi.training import config as _config
-
     experiment = parse_name(name)
     if not experiment.is_student:
         raise ValueError(f"{name} is not a distilled student")
-    weak = base_config(f"{experiment.task}_B", exp_name=exp_name, num_workers=num_workers)
-    strong = base_config(f"{experiment.task}_A", exp_name=exp_name, num_workers=num_workers)
+    weak = base_config(f"{experiment.task}_B", exp_name=exp_name or name, num_workers=num_workers)
+    strong = base_config(f"{experiment.task}_A", num_workers=num_workers)
     assets = strong.data.assets
     if assets.assets_dir is None:
-        # The student has its own config name; keep reading the teacher's statistics.
+        # Read the statistics the teacher was trained with (checked equal to B's at start-up).
         assets = dataclasses.replace(assets, assets_dir=str(strong.assets_dirs))
     return dataclasses.replace(
         weak,
-        name=name,
-        exp_name=exp_name,
         project_name=WANDB_PROJECT,
         data=dataclasses.replace(strong.data, assets=assets),
         resume=resume,
         overwrite=overwrite,
         wandb_enabled=wandb,
     )
+
+
+def run_location(name: str, exp_name: str | None = None) -> tuple[str, str, str]:
+    """(task, model, run name) under which an experiment's checkpoints live."""
+    experiment = parse_name(name)
+    model = BASE_MODELS["B" if experiment.is_student else experiment.kind]
+    return experiment.task, model, exp_name or name
 
 
 def latest_checkpoint(checkpoint_dir) -> pathlib.Path | None:
@@ -114,20 +123,20 @@ def latest_checkpoint(checkpoint_dir) -> pathlib.Path | None:
     return checkpoint_dir / str(max(steps)) if steps else None
 
 
-def create_policy(name: str, checkpoint_dir, *, exp_name: str = "run1"):
-    """Build the serving policy for a trained experiment, plus its norm stats.
+def create_policy(name: str, *, exp_name: str | None = None, checkpoint_dir=None, step: int | None = None):
+    """Serving policy for a trained experiment, built by `training/serve.py`.
 
-    gc_C and gc_D_w* are served with gc_B's config: their checkpoints are ordinary
-    vision-only checkpoints.
+    Returns (policy, norm_stats, checkpoint_dir). gc_C and gc_D_w* are ordinary
+    vision-only runs and load exactly like gc_B.
     """
-    from openpi.policies import policy_config
+    import serve  # training/serve.py
+
     from openpi.training import checkpoints as _checkpoints
 
-    experiment = parse_name(name)
-    config_name = f"{experiment.task}_B" if experiment.is_student else name
-    train_config = base_config(config_name, exp_name=exp_name)
-    checkpoint_dir = pathlib.Path(checkpoint_dir)
-    policy = policy_config.create_trained_policy(train_config, checkpoint_dir)
+    task, model, run_name = run_location(name, exp_name)
+    policy, train_config, checkpoint = serve.load_policy(
+        task, model, run_name, step=step, checkpoint_dir=checkpoint_dir
+    )
     data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
-    norm_stats = _checkpoints.load_norm_stats(checkpoint_dir / "assets", data_config.asset_id)
-    return policy, norm_stats
+    norm_stats = _checkpoints.load_norm_stats(pathlib.Path(checkpoint) / "assets", data_config.asset_id)
+    return policy, norm_stats, pathlib.Path(checkpoint)

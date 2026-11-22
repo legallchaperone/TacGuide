@@ -5,8 +5,8 @@ Additions on top of the bundled OpenVTLA training code (`training/run.py`,
 
 | Experiment | What it is | How it is trained |
 | --- | --- | --- |
-| `gc_A` | teacher, vision + tactile | official: `run.py train --task gc --model openvtla` |
-| `gc_B` | plain student, vision only | official: `run.py train --task gc --model pi05` |
+| `gc_A` | teacher, vision + tactile | `training/tacguide.sh train gc_A <gpu>` |
+| `gc_B` | plain student, vision only | `training/tacguide.sh train gc_B <gpu>` |
 | `gc_C` | distilled student, w = 1 | `tacguide/train_distill.py gc_C` |
 | `gc_D_w<w>` | extrapolated student | `tacguide/train_distill.py gc_D_w2` |
 
@@ -28,7 +28,8 @@ as the runtime does, evaluates the frozen teachers and regresses
 
 The student is initialised and optimised exactly like `gc_B` (its config is derived
 from `gc_B` in `configs.py`), and its checkpoints are ordinary vision-only
-checkpoints, served with the `gc_B` config. Details that matter:
+checkpoints under `outputs/training/pi05/gc/<name>`, served like `gc_B`
+(`training/serve.py --task gc --model pi05 --exp-name gc_C`). Details that matter:
 
 - The three models share one preprocessing call, so they see the same random crop,
   rotation and colour jitter.
