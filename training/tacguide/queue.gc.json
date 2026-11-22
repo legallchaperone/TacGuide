@@ -1,0 +1,57 @@
+{
+  "_comment": "Grasp Chip task queue (plan section 任务队列). Paths are relative to cwd. Lower priority number runs first. Training A and B is launched by whoever owns phase 3; flip `enabled` to hand them to the scheduler. chosen_w.txt holds the w picked in phase 4 (e.g. `2` or `1.5`).",
+  "cwd": "$HOME/TacGuide",
+  "state_dir": "$TG/queue",
+  "log_dir": "$TG/queue/logs",
+  "jobs": [
+    {
+      "name": "train_gc_A",
+      "enabled": false,
+      "priority": 1,
+      "requires": ["data/training/lerobot/gc", "data/training/stats/openvtla/gc/norm_stats.json", "weights/anytouch2/checkpoint-4frames.pth"],
+      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/run.py train --task gc --model openvtla --exp-name run1",
+      "resume_if": "outputs/training/openvtla/gc/run1/[0-9]*/model.safetensors",
+      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/run.py train --task gc --model openvtla --exp-name run1 --resume",
+      "done_if": "outputs/training/openvtla/gc/run1/10000/model.safetensors"
+    },
+    {
+      "name": "train_gc_B",
+      "enabled": false,
+      "priority": 1,
+      "requires": ["data/training/lerobot/gc", "data/training/stats/pi05/gc/norm_stats.json"],
+      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/run.py train --task gc --model pi05 --exp-name run1",
+      "resume_if": "outputs/training/pi05/gc/run1/[0-9]*/model.safetensors",
+      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/run.py train --task gc --model pi05 --exp-name run1 --resume",
+      "done_if": "outputs/training/pi05/gc/run1/10000/model.safetensors"
+    },
+    {
+      "name": "train_gc_D",
+      "priority": 3,
+      "vars_from": {"w": "$TG/queue/chosen_w.txt"},
+      "requires": ["outputs/training/openvtla/gc/run1/10000/model.safetensors", "outputs/training/pi05/gc/run1/10000/model.safetensors"],
+      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --exp-name run1",
+      "resume_if": "outputs/training/gc_D_w{w}/run1/[0-9]*/model.safetensors",
+      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --exp-name run1 --resume",
+      "done_if": "outputs/training/gc_D_w{w}/run1/10000/model.safetensors"
+    },
+    {
+      "name": "train_gc_C",
+      "priority": 3.5,
+      "requires": ["outputs/training/openvtla/gc/run1/10000/model.safetensors"],
+      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_C --exp-name run1",
+      "resume_if": "outputs/training/gc_C/run1/[0-9]*/model.safetensors",
+      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_C --exp-name run1 --resume",
+      "done_if": "outputs/training/gc_C/run1/10000/model.safetensors"
+    },
+    {
+      "name": "train_gc_D_w2_extra",
+      "enabled": false,
+      "priority": 5,
+      "requires": ["outputs/training/openvtla/gc/run1/10000/model.safetensors", "outputs/training/pi05/gc/run1/10000/model.safetensors"],
+      "cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --exp-name run1",
+      "resume_if": "outputs/training/gc_D_w2/run1/[0-9]*/model.safetensors",
+      "resume_cmd": "source training/tacguide_env.sh && $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --exp-name run1 --resume",
+      "done_if": "outputs/training/gc_D_w2/run1/10000/model.safetensors"
+    }
+  ]
+}
