@@ -33,6 +33,26 @@ wandb logging. To train on the public dataset instead of collected HDF5, run
 `training/convert_official_lerobot.py --source <dataset> --task gc`, then the two `stats`
 commands from the README.
 
+## Current runs and how to resume them
+
+| Run | Card | Started (UTC, 2026-11-22) | Speed |
+| --- | --- | --- | --- |
+| `gc_A` | 7 | 20:29 | 6.6 s/step, about 18 h |
+| `gc_B` | 5 | 21:03 | 7.6 s/step, about 21 h |
+
+Each runs in tmux `train_gc_A` / `train_gc_B`, logging to `$TG/logs/train_gc_*.log`.
+`training/watch_ab.sh gc_A:7 gc_B:5` (tmux `watch_ab`) writes `$TG/logs/watch_ab.status`
+every five minutes and resumes a run that died, on the same card, when that card has room.
+To resume by hand, possibly on another card:
+
+```bash
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True training/tacguide.sh train gc_B <gpu> --resume
+```
+
+The cards are shared with another user's 40 GB process, which leaves 2 to 3 GB of headroom
+for `gc_B`; `expandable_segments` reduces fragmentation. Only one resumer may act on a run:
+stop `watch_ab` before letting another scheduler manage these two runs.
+
 ## Policy interface
 
 | Field | Shape | Content |
@@ -72,7 +92,15 @@ to absolute targets. The sim client executes the first 20 actions of each chunk.
 4. The plan's `observation/left_tactile_image` single frames are replaced by the clip
    fields above for OpenVTLA.
 5. wandb is off for now; losses are in the training log under `/data2/cwx/TacGuide/logs`.
-6. Environment variables live in `training/tacguide_env.sh`, not `~/.bashrc`, because the
+6. Training data is the public OpenViTac grasp_chip dataset (100 episodes, 43,287 frames),
+   not 100 self-collected demonstrations (Simon, 2026-11-22), so collection (stage 1) is
+   skipped. Its images come from h264 videos at the source resolution, resized to 224, not
+   from the HDF5 JPEG frames. State, action and image content were checked against the
+   source with `checks/check_official_conversion.py`.
+7. For evaluation, single models are served through the guided-inference server of the
+   distillation branch (strong model only) so that all configurations share its seeded
+   noise; `serve.py` here is the plain server used for link tests.
+8. Environment variables live in `training/tacguide_env.sh`, not `~/.bashrc`, because the
    account is shared with other projects.
 
 ## Code added on top of the release
