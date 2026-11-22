@@ -213,3 +213,26 @@ def norm_stats_equal(a, b, keys: Sequence[str] = ("state", "actions")) -> tuple[
                 diff = float(np.max(np.abs(np.asarray(left) - np.asarray(right))))
                 return False, f"{key}.{field} differs (max abs diff {diff:.3g})"
     return True, ""
+
+
+def vision_observation(observation):
+    """The vision-only pipeline's observation for the frames of a vision+tactile batch.
+
+    Same camera mapping as ``vision_view`` but before preprocessing, for code paths
+    that hand a whole observation to a vision-only model (e.g. ``sample_actions``).
+    """
+    from openpi.models import model as _model
+
+    base = observation.images["base_0_rgb"]
+    present = torch.ones(base.shape[0], dtype=torch.bool, device=base.device)
+    return _model.Observation(
+        images={
+            "base_0_rgb": base,
+            "left_wrist_0_rgb": observation.images[VISION_FROM_TACTILE_BATCH["left_wrist_0_rgb"]],
+            "right_wrist_0_rgb": torch.full_like(base, MASKED_IMAGE_FILL),
+        },
+        image_masks={"base_0_rgb": present, "left_wrist_0_rgb": present, "right_wrist_0_rgb": ~present},
+        state=observation.state,
+        tokenized_prompt=observation.tokenized_prompt,
+        tokenized_prompt_mask=observation.tokenized_prompt_mask,
+    )

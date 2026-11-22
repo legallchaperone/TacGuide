@@ -70,25 +70,9 @@ def make_batch(seed=0, batch=BATCH):
 
 
 def vision_observation(observation):
-    """What the vision-only data pipeline would have produced for the same frames."""
-    from openpi.models import model as _model
+    from tacguide import velocity
 
-    base = observation.images["base_0_rgb"]
-    return _model.Observation(
-        images={
-            "base_0_rgb": base,
-            "left_wrist_0_rgb": observation.images["wrist_0_rgb"],
-            "right_wrist_0_rgb": torch.full_like(base, -1.0),
-        },
-        image_masks={
-            "base_0_rgb": torch.ones(base.shape[0], dtype=torch.bool),
-            "left_wrist_0_rgb": torch.ones(base.shape[0], dtype=torch.bool),
-            "right_wrist_0_rgb": torch.zeros(base.shape[0], dtype=torch.bool),
-        },
-        state=observation.state,
-        tokenized_prompt=observation.tokenized_prompt,
-        tokenized_prompt_mask=observation.tokenized_prompt_mask,
-    )
+    return velocity.vision_observation(observation)
 
 
 @pytest.fixture(scope="session")
