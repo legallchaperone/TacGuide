@@ -78,24 +78,27 @@ def build_config(args):
                 delta_joint_actions=True,
             ),
         )
-    steps = getattr(args, "steps", None) or steps_for(args.task)
-    save_interval = getattr(args, "save_interval", None) or base.save_interval
+    # Only fields that were asked for are overridden, so unset flags keep the released defaults.
+    overrides = {}
+    if getattr(args, "save_interval", None):
+        overrides.update(save_interval=args.save_interval, keep_period=args.save_interval)
+    if getattr(args, "log_interval", None):
+        overrides["log_interval"] = args.log_interval
+    if getattr(args, "overwrite", False):
+        overrides["overwrite"] = True
+    if getattr(args, "wandb", False):
+        overrides.update(wandb_enabled=True, project_name=args.wandb_project)
     return dataclasses.replace(
         base,
         name=args.model,
-        project_name=getattr(args, "wandb_project", None) or base.project_name,
         assets_base_dir=str(DATA / "stats"),
         checkpoint_base_dir=str(OUTPUTS),
         exp_name=f"{args.task}/{args.exp_name}",
         batch_size=getattr(args, "batch_size", None) or BATCH_SIZE,
         num_workers=args.num_workers,
-        num_train_steps=steps,
-        save_interval=save_interval,
-        keep_period=save_interval,
-        log_interval=getattr(args, "log_interval", None) or base.log_interval,
+        num_train_steps=getattr(args, "steps", None) or steps_for(args.task),
         resume=args.resume,
-        overwrite=getattr(args, "overwrite", False),
-        wandb_enabled=getattr(args, "wandb", False),
+        **{"wandb_enabled": False, **overrides},
     )
 
 

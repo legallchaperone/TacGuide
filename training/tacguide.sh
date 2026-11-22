@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# TacGuide experiment commands for the training machine. Run from anywhere:
+#
+#   training/tacguide.sh prep  <dir with the collected .hdf5 episodes>   # link data, convert, stats
+#   training/tacguide.sh smoke gc_A|gc_B <gpu>                           # 10 steps, batch 64, no wandb
+#   training/tacguide.sh train gc_A|gc_B <gpu> [--resume]                # full run, wandb project TacGuide
+#   training/tacguide.sh serve gc_A|gc_B <gpu> [port] [step]             # policy server for evaluation
+#
+# gc_A = OpenVTLA (vision + touch), gc_B = π0.5 (vision only), both on Grasp Chip.
+# Steps and checkpoint interval can be changed with TG_STEPS and TG_SAVE_INTERVAL.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/training/tacguide_env.sh"
+cd "$ROOT"
+TASK=gc
+PY="$UV_PROJECT_ENVIRONMENT/bin/python"
+STEPS="${TG_STEPS:-10000}"
+SAVE_INTERVAL="${TG_SAVE_INTERVAL:-1000}"
+
+model_for() {
+  case "$1" in
+    gc_A*) echo openvtla ;;
+    gc_B*) echo pi05 ;;
+    *) echo "unknown experiment '$1' (expected gc_A or gc_B)" >&2; exit 2 ;;
+  esac
+}
+
+cmd="${1:?usage: tacguide.sh prep|smoke|train|serve ...}"; shift
+case "$cmd" in
+  prep)
+    src="$(realpath "${1:?directory with .hdf5 episodes}")"
+    ls "$src"/*.hdf5 >/dev/null
+    mkdir -p data/training/hdf5
+    ln -sfn "$src" "data/training/hdf5/$TASK"
+    "$PY" training/run.py convert --task "$TASK"
+    CUDA_VISIBLE_DEVICES= "$PY" training/run.py stats --task "$TASK" --model pi05
+    CUDA_VISIBLE_DEVICES= "$PY" training/run.py stats --task "$TASK" --model openvtla
+    "$PY" training/checks/check_conversion.py --task "$TASK" --episodes 3 --out "data/training/checks/$TASK"
+    ;;
+  smoke)
+    exp="${1:?gc_A or gc_B}"; gpu="${2:?gpu index}"
+    CUDA_VISIBLE_DEVICES="$gpu" "$PY" training/run.py train --task "$TASK" --model "$(model_for "$exp")" \
+      --exp-name "${exp}_smoke" --steps "${TG_SMOKE_STEPS:-10}" --save-interval "${TG_SMOKE_STEPS:-10}" \
+      --log-interval 1 --overwrite
+    ;;
+  train)
+    exp="${1:?gc_A or gc_B}"; gpu="${2:?gpu index}"; shift 2
+    CUDA_VISIBLE_DEVICES="$gpu" "$PY" training/run.py train --task "$TASK" --model "$(model_for "$exp")" \
+      --exp-name "$exp" --steps "$STEPS" --save-interval "$SAVE_INTERVAL" --wandb "$@"
+    ;;
+  serve)
+    exp="${1:?gc_A or gc_B}"; gpu="${2:?gpu index}"; port="${3:-8000}"; step="${4:-}"
+    CUDA_VISIBLE_DEVICES="$gpu" "$PY" training/serve.py --task "$TASK" --model "$(model_for "$exp")" \
+      --exp-name "$exp" --port "$port" ${step:+--step "$step"}
+    ;;
+  *) echo "unknown command '$cmd'" >&2; exit 2 ;;
+esac
