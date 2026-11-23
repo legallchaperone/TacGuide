@@ -145,7 +145,7 @@ def test_shipped_queue_file_is_valid():
     queue = json.loads(path.read_text())
     names = [job["name"] for job in queue["jobs"]]
     assert {"train_gc_C", "train_gc_D"} <= set(names) and not {"train_gc_A", "train_gc_B"} & set(names)
-    assert 5 not in queue["allowed_gpus"] and 7 not in queue["allowed_gpus"]
+    assert 1 not in queue["allowed_gpus"] and 5 not in queue["allowed_gpus"]
     for job in queue["jobs"]:
         assert {"cmd", "resume_cmd", "resume_if", "done_if", "priority"} <= set(job)
 
