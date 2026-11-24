@@ -33,14 +33,21 @@ wandb logging. To train on the public dataset instead of collected HDF5, run
 `training/convert_official_lerobot.py --source <dataset> --task gc`, then the two `stats`
 commands from the README.
 
-## Current runs and how to resume them
+## Finished runs and how to resume a run
 
-| Run | Card | Started (UTC, 2026-11-22) | Speed |
+| Run | Final checkpoint (UTC) | Wall-clock training time | Last 100 steps |
 | --- | --- | --- | --- |
-| `gc_A` | 7 | 20:29 | 6.6 s/step, about 18 h |
-| `gc_B` | 5 | 21:03 | 7.6 s/step, about 21 h |
+| `gc_A` | 2026-11-24 01:53, `outputs/training/openvtla/gc/gc_A/10000` | about 23 h | mean loss 0.0007 |
+| `gc_B` | 2026-11-24 03:48, `outputs/training/pi05/gc/gc_B/10000` | about 25 h | mean loss 0.0007 |
 
-Each runs in tmux `train_gc_A` / `train_gc_B`, logging to `$TG/logs/train_gc_*.log`.
+Both started on 2026-11-22 (20:29 and 21:03 UTC, cards 7 and 5) at 6.6 and 7.6 s/step. On
+2026-11-23 every process of the account was terminated between 13:35 and 16:00 UTC while the
+shared `/data2` disk was overloaded (single checkpoint saves were taking over an hour). The
+runs were resumed at 19:35 UTC from steps 7000 and 6000 on cards 1 and 5, shared with other
+users' jobs, at about 7.3 s/step, so each run repeated about 1000 steps. Both final
+checkpoints carry identical normalisation statistics.
+
+An active run sits in tmux `train_gc_A` / `train_gc_B` and logs to `$TG/logs/train_gc_*.log`.
 `training/watch_ab.sh gc_A:7 gc_B:5` (tmux `watch_ab`) writes `$TG/logs/watch_ab.status`
 every five minutes and resumes a run that died, on the same card, when that card has room.
 To resume by hand, possibly on another card:
