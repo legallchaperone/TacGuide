@@ -80,8 +80,12 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, enabled: bool = T
     if not ckpt_dir.exists():
         raise FileNotFoundError(f"Checkpoint directory {ckpt_dir} does not exist.")
 
-    if resuming:
-        run_id = (ckpt_dir / "wandb_id.txt").read_text().strip()
+    id_file = ckpt_dir / "wandb_id.txt"
+    offline = os.environ.get("WANDB_MODE", "") == "offline"
+    # A run that was started without wandb (or logged offline) has no online run to resume:
+    # start a new wandb run under the same name instead of failing.
+    if resuming and id_file.exists() and not offline:
+        run_id = id_file.read_text().strip()
         wandb.init(id=run_id, resume="must", project=config.project_name)
     else:
         wandb.init(

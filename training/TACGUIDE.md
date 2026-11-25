@@ -120,3 +120,16 @@ to absolute targets. The sim client executes the first 20 actions of each chunk.
 - `policy/openpi/tactile_history.py` and `deploy_policy.py`: tactile clips and the `reset`
   flag; enabled by `tactile_history_offsets` in `deploy_grasp_chip_vision_tactile.yml`.
 - `convert_official_lerobot.py`, `tacguide.sh`, `tacguide_env.sh`, `checks/`, two test files.
+
+## wandb
+
+`TG_WANDB=1 training/tacguide.sh train <run> <gpu>` logs loss, learning rate and checkpoint steps to
+the wandb project `TacGuide` (override with `WANDB_PROJECT`). State on 2026-11-25:
+
+- wandb 0.28.2 is installed in the shared env; the machine is not logged in (`wandb login` once).
+- The wandb API answers 403 to requests from the training machine (it answers normally elsewhere),
+  so online logging does not work from there directly. Use `WANDB_MODE=offline` (runs are written
+  under `/data2/cwx/TacGuide/wandb`) and upload them with `wandb sync` from a place that reaches
+  the API, or give the machine a working proxy.
+- A run resumed from a checkpoint that was created without wandb (or offline) starts a new wandb
+  run under the same name instead of failing on the missing `wandb_id.txt`.
