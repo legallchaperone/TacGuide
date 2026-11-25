@@ -202,6 +202,55 @@ class Policy(BasePolicy):
             control_mode=self.control_mode,
             eef_state_mode=self.eef_state_mode,
         )
+        # LOCAL VALIDITY CHECK (enabled only by environment variable): for the vision-only client, read the tactile images anyway at step 0.
+        import os as _osv
+        self._tac_check = None
+        if _osv.environ.get("TACGUIDE_VALIDATE") and self._policy_step_index == 0 and not self.send_tactile:
+            try:
+                _o2 = openpi_obs_from_openvitac(
+                    observation=observation, prompt=self._get_prompt(task), image_size=self.image_size,
+                    send_tactile=True, tactile_image_keys=self.tactile_image_keys,
+                    image_color_order=self.image_color_order, control_mode=self.control_mode,
+                    eef_state_mode=self.eef_state_mode,
+                )
+                self._tac_check = {sd: np.asarray(_o2[f"observation/{sd}_tactile_image"]) for sd in ("left", "right")}
+            except Exception as _e:
+                print("TACGUIDE start check: could not read tactile for vision client:", _e, flush=True)
+        # LOCAL VALIDITY CHECK (enabled only by environment variable): reject episodes whose simulator start-up state is broken.
+        import os as _os0
+        if _os0.environ.get("TACGUIDE_VALIDATE") and self._policy_step_index == 0:
+            import cv2 as _cv2, json as _json
+            _rep = {"wrist_mean": float(np.asarray(obs["observation/wrist_image"]).mean())}
+            _bad = _rep["wrist_mean"] > 132.0
+            _ref = _os0.environ.get("TACGUIDE_TACTILE_REF")
+            _ref = np.load(_ref).astype(np.float64) if _ref and _os0.path.exists(_ref) else None
+            for _side in ("left", "right"):
+                _k = f"observation/{_side}_tactile_clip"
+                if _k in obs:
+                    _im = np.asarray(obs[_k])[-1]
+                elif f"observation/{_side}_tactile_image" in obs:
+                    _im = np.asarray(obs[f"observation/{_side}_tactile_image"])
+                elif getattr(self, "_tac_check", None) is not None:
+                    _im = self._tac_check[_side]
+                else:
+                    continue
+                _refp = (_os0.environ.get("TACGUIDE_TACTILE_REF") or "").replace("_left_", f"_{_side}_")
+                _ref = np.load(_refp).astype(np.float64) if _refp and _os0.path.exists(_refp) else None
+                _g = _cv2.cvtColor(_im, _cv2.COLOR_RGB2GRAY)
+                _n, _lab, _st, _ = _cv2.connectedComponentsWithStats((_g < 45).astype(np.uint8), connectivity=8)
+                _cnt = int(sum(1 for _i in range(1, _n) if 6 <= _st[_i, _cv2.CC_STAT_AREA] <= 400))
+                _frac = float((_g < 45).mean())
+                _rep[f"{_side}_markers"] = _cnt; _rep[f"{_side}_dark_frac"] = _frac
+                if _ref is not None and _ref.shape == _im.shape:
+                    _rep[f"{_side}_ref_mad"] = float(np.abs(_im.astype(np.float64) - _ref).mean())
+                _bad = _bad or _cnt != 63 or not (0.070 <= _frac <= 0.082)
+            _rep["bad_start"] = bool(_bad)
+            _vd = _os0.environ.get("TACGUIDE_TRACE", "/tmp")
+            _os0.makedirs(_vd, exist_ok=True)
+            open(_os0.path.join(_vd, "START_CHECK.json"), "w").write(_json.dumps(_rep))
+            print("TACGUIDE start check:", _rep, flush=True)
+            if _bad:
+                raise RuntimeError(f"tacguide_bad_start: {_rep}")
         if self._policy_step_index < self.debug_dump_first_n_obs:
             saved_paths = save_openpi_observation_images(
                 obs,
@@ -307,6 +356,14 @@ class Policy(BasePolicy):
             self._action_chunk = self._normalize_server_chunk(self.client.infer(obs), obs, task)
             self._chunk_step = 0
             print(f"OpenPI action chunk: {self._action_chunk.shape}")
+            # LOCAL DIAGNOSTIC (enabled only by environment variable): dump each query's observation and action chunk.
+            import os as _os
+            _trace = _os.environ.get("TACGUIDE_TRACE")
+            if _trace:
+                _os.makedirs(_trace, exist_ok=True)
+                _d = {k.replace("/", "__"): np.asarray(v) for k, v in obs.items() if not isinstance(v, (str, bool))}
+                _d["action_chunk"] = np.asarray(self._action_chunk)
+                np.savez_compressed(_os.path.join(_trace, f"q{self._policy_step_index:05d}.npz"), **_d)
 
         action = np.asarray(self._action_chunk[self._chunk_step], dtype=np.float64)
         self._chunk_step += 1
@@ -350,6 +407,13 @@ class Policy(BasePolicy):
         )
         if should_query:
             chunk = self._normalize_server_chunk(self.client.infer(obs), obs, task)
+            import os as _os
+            _trace = _os.environ.get("TACGUIDE_TRACE")
+            if _trace:  # LOCAL DIAGNOSTIC (enabled only by environment variable)
+                _os.makedirs(_trace, exist_ok=True)
+                _d = {k.replace("/", "__"): np.asarray(v) for k, v in obs.items() if not isinstance(v, (str, bool))}
+                _d["action_chunk"] = np.asarray(chunk)
+                np.savez_compressed(_os.path.join(_trace, f"q{current_step:05d}.npz"), **_d)
             if self.temporal_ensemble_space == "delta_eef_qpos_rollout":
                 chunk = self._delta_eef_chunk_to_qpos_chunk(chunk, task)
             for offset, action in enumerate(chunk[: self.temporal_ensemble_horizon]):

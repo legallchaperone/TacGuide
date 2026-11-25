@@ -6,7 +6,8 @@
 #   training/tacguide.sh train gc_A|gc_B <gpu> [--resume]                # full run; TG_WANDB=1 logs to wandb project TacGuide
 #   training/tacguide.sh serve gc_A|gc_B <gpu> [port] [step]             # policy server for evaluation
 #
-# gc_A = OpenVTLA (vision + touch), gc_B = π0.5 (vision only), both on Grasp Chip.
+# <task>_A = OpenVTLA (vision + touch), <task>_B = π0.5 (vision only). The task is TG_TASK (default gc);
+# for Gear Assembly use TG_TASK=ga with ga_A / ga_B.
 # Steps and checkpoint interval can be changed with TG_STEPS and TG_SAVE_INTERVAL.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,9 +20,9 @@ SAVE_INTERVAL="${TG_SAVE_INTERVAL:-1000}"
 
 model_for() {
   case "$1" in
-    gc_A*) echo openvtla ;;
-    gc_B*) echo pi05 ;;
-    *) echo "unknown experiment '$1' (expected gc_A or gc_B)" >&2; exit 2 ;;
+    *_A*) echo openvtla ;;
+    *_B*) echo pi05 ;;
+    *) echo "unknown experiment '$1' (expected <task>_A or <task>_B, e.g. gc_A, ga_B)" >&2; exit 2 ;;
   esac
 }
 
