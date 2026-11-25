@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run one long job in its own systemd scope (own cgroup) and its own tmux server, so that the
-# out-of-memory killer or a dying tmux server takes down only that job, not every job of the account.
+# Run one long job in its own tmux server, so that a dying tmux server takes down only that job,
+# not every job of the account.
 #
 #   training/isolated.sh <name> <command...>      # start; attach with: tmux -L tg-<name> attach
 #   training/isolated.sh --alive <name>           # exit 0 if the job's tmux server is still up
@@ -15,7 +15,9 @@ case "${1:-}" in
   *)
     name="$1"; shift
     if tmux -L "tg-$name" has-session -t "$name" 2>/dev/null; then echo "$name is already running" >&2; exit 1; fi
-    systemd-run --user --scope --quiet --unit="tg-$name-$(date +%s)" \
-      tmux -L "tg-$name" new-session -d -s "$name" "$*"
+    # Deliberately NOT systemd-run --user: units under user@UID.service are watched by systemd-oomd
+    # (memory-pressure limit 50% for 20 s) and were killed within minutes while loading checkpoints
+    # from the slow shared disk. A plain tmux server stays in the login session scope instead.
+    setsid tmux -L "tg-$name" new-session -d -s "$name" "$*"
     ;;
 esac
