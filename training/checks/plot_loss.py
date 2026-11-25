@@ -19,7 +19,7 @@ LABEL = {"ga_A": "ga_A  gear assembly, vision + touch", "ga_B": "ga_B  gear asse
          "gc_B": "gc_B  grasp chip, vision only (continued from 10k)", "gc_A": "gc_A  grasp chip, vision + touch",
          "gc_C": "gc_C  grasp chip, distilled student", "gc_D": "gc_D  grasp chip, extrapolated student"}
 COLOR = {"ga_A": "#1f77b4", "ga_B": "#ff7f0e", "gc_B": "#2ca02c", "gc_A": "#9467bd", "gc_C": "#d62728", "gc_D": "#8c564b"}
-PAT = re.compile(r"loss=([0-9.eE+-]+), lr=([0-9.eE+-]+), step=([0-9]+)")
+PAT = re.compile(r"loss=([0-9.eE+-]+), lr=([0-9.eE+-]+), step=([0-9]+)(?![0-9.eE+])")  # skips rounded "1e+4"
 
 
 def read(run):
@@ -30,9 +30,11 @@ def read(run):
             return None
         path = queued[-1]
     data = {}
-    with open(path, errors="ignore") as f:
-        for m in PAT.finditer(f.read().replace("\r", "\n")):
-            data[int(m.group(3))] = float(m.group(1))
+    # Earlier segments of the same run (set aside as train_<run>_to_<step>_*.log after an interruption) come first.
+    for part in sorted(glob.glob(f"{TG}/logs/train_{run}_to_*.log")) + [path]:
+        with open(part, errors="ignore") as f:
+            for m in PAT.finditer(f.read().replace("\r", "\n")):
+                data[int(m.group(3))] = float(m.group(1))
     if not data:
         return None
     steps = np.array(sorted(data)); loss = np.array([data[s] for s in steps])
