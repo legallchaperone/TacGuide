@@ -11,22 +11,31 @@
 # Guided servers use fixed ports: w = 1 -> 8002, 1.5 -> 8003, 2 -> 8004, 3 -> 8005 (default w: 2 1.5 3).
 # All models are the 10000-step checkpoints, noise seed 0.
 #
-# Why "one at a time, each isolated": on 2026-11-25 four servers were started in parallel inside
-# the tmux server that also held the training runs; the machine was under memory pressure and the
-# memory daemon killed that whole cgroup. So every process here gets its own tmux server inside its
-# own systemd scope, and the next server is only started once the previous one answers /healthz.
+# Why "one at a time, each in its own tmux server": on 2026-11-25 the memory daemon (systemd-oomd)
+# twice killed every TacGuide process while a server was loading its model. First all jobs shared one
+# tmux server; then they were in `systemd-run --user` scopes, which sit under user@<uid>.service and
+# its 50% memory-pressure kill rule. A plain login session with a tmux server of its own is outside
+# that rule, so that is what this script uses. Run it from a fresh ssh connection per process when
+# you can, check `cat /proc/pressure/memory` first, and never load two models at once.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/training/tacguide_env.sh"
 mkdir -p "$TG/logs/distill" "$TG/queue"
 STEP=10000
 
-isolated() {  # name command...: run in a tmux server and cgroup scope of its own
+pressure_ok() {  # refuse to add load while the machine is already stalling on memory
+  local avg10
+  avg10="$(awk '/^full/ {sub("avg10=", "", $2); print $2}' /proc/pressure/memory 2>/dev/null || echo 0)"
+  if awk -v v="$avg10" 'BEGIN { exit !(v > 2.0) }'; then
+    echo "memory pressure is ${avg10}% (full, 10 s); not starting anything now" >&2; return 1
+  fi
+}
+
+isolated() {  # name command...: run in a tmux server of its own
   local name="$1"; shift
   if tmux -L "tg_$name" has-session 2>/dev/null; then echo "tg_$name is already running"; return 1; fi
-  local scope=()
-  if systemd-run --user --scope -q true 2>/dev/null; then scope=(systemd-run --user --scope -q --unit "tg-$name-$(date +%H%M%S)"); fi
-  "${scope[@]}" tmux -L "tg_$name" new-session -d -s "$name" "$*"
+  pressure_ok
+  tmux -L "tg_$name" new-session -d -s "$name" "$*"
 }
 
 serve() {  # name gpu port serve_guided-arguments...

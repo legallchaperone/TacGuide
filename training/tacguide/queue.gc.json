@@ -1,5 +1,5 @@
 {
-  "_comment": "Grasp Chip queue for the distilled students (plan section 任务队列). gc_A and gc_B are trained and resumed by the watch_ab watcher, not from here. Paths are relative to cwd; lower priority number runs first. chosen_w.txt holds the w picked in stage 4 (e.g. `2` or `1.5`). Memory figures come from the batch-64 test: student card 53 GB reserved, both teachers 31 GB reserved. A job first looks for one card with enough room for everything, otherwise it puts the student on one card and the frozen teachers on a second. Cards 2, 5 and 7 are left to the gear-assembly runs and the gc_B continuation (2026-11-25); a card that already runs a TacGuide process is never shared. First launch uses --overwrite because the trainer refuses an existing run directory; once a checkpoint exists the resume command is used. Checkpoints every 1000 steps, the two newest plus the final one are kept. Every job is started in its own systemd scope (launch_prefix): on 2026-11-25 the memory daemon killed the whole tmux scope, taking every training and server with it.",
+  "_comment": "Grasp Chip queue for the distilled students (plan section 任务队列). gc_A and gc_B are trained and resumed by the watch_ab watcher, not from here. Paths are relative to cwd; lower priority number runs first. chosen_w.txt holds the w picked in stage 4 (e.g. `2` or `1.5`). Memory figures come from the batch-64 test: student card 53 GB reserved, both teachers 31 GB reserved. A job first looks for one card with enough room for everything, otherwise it puts the student on one card and the frozen teachers on a second. Cards 2, 5 and 7 are left to the gear-assembly runs and the gc_B continuation (2026-11-25); a card that already runs a TacGuide process is never shared. First launch uses --overwrite because the trainer refuses an existing run directory; once a checkpoint exists the resume command is used. Checkpoints every 1000 steps, the two newest plus the final one are kept. Do not wrap jobs in `systemd-run --user`: scopes under user@<uid>.service are subject to the memory daemon's 50% pressure-kill rule on this machine (2026-11-25); start the scheduler from a plain ssh session in a tmux server of its own.",
   "cwd": "$HOME/TacGuide-distill",
   "state_dir": "$TG/queue",
   "log_dir": "$TG/queue/logs",
@@ -96,13 +96,5 @@
       "done_if": "outputs/training/pi05/gc/gc_D_w2/10000/model.safetensors",
       "enabled": false
     }
-  ],
-  "launch_prefix": [
-    "systemd-run",
-    "--user",
-    "--scope",
-    "-q",
-    "--unit",
-    "tg-{name}-{stamp}"
   ]
 }
