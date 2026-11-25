@@ -1,15 +1,14 @@
 {
-  "_comment": "Grasp Chip queue for the distilled students (plan section 任务队列). gc_A and gc_B are trained and resumed by the watch_ab watcher, not from here. Paths are relative to cwd; lower priority number runs first. chosen_w.txt holds the w picked in stage 4 (e.g. `2` or `1.5`). Memory figures come from the batch-64 test: student card 53 GB reserved, both teachers 31 GB reserved. A job first looks for one card with enough room for everything, otherwise it puts the student on one card and the frozen teachers on a second. Cards 1 and 5 are left to gc_A and gc_B (their cards since the 2026-11-23 restart); a card that already runs a TacGuide process is never shared. First launch uses --overwrite because the trainer refuses an existing run directory; once a checkpoint exists the resume command is used. Checkpoints every 1000 steps, the two newest plus the final one are kept.",
+  "_comment": "Grasp Chip queue for the distilled students (plan section 任务队列). gc_A and gc_B are trained and resumed by the watch_ab watcher, not from here. Paths are relative to cwd; lower priority number runs first. chosen_w.txt holds the w picked in stage 4 (e.g. `2` or `1.5`). Memory figures come from the batch-64 test: student card 53 GB reserved, both teachers 31 GB reserved. A job first looks for one card with enough room for everything, otherwise it puts the student on one card and the frozen teachers on a second. Cards 2, 5 and 7 are left to the gear-assembly runs and the gc_B continuation (2026-11-25); a card that already runs a TacGuide process is never shared. First launch uses --overwrite because the trainer refuses an existing run directory; once a checkpoint exists the resume command is used. Checkpoints every 1000 steps, the two newest plus the final one are kept.",
   "cwd": "$HOME/TacGuide-distill",
   "state_dir": "$TG/queue",
   "log_dir": "$TG/queue/logs",
   "allowed_gpus": [
     0,
-    2,
+    1,
     3,
     4,
-    6,
-    7
+    6
   ],
   "own_marker": "TacGuide",
   "jobs": [

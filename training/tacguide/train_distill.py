@@ -93,6 +93,11 @@ def resolve_teacher_dir(explicit, train_config, *, allow_partial: bool, base_sta
         return pathlib.Path(train_config.pytorch_weight_path)
     if explicit:
         return pathlib.Path(explicit)
+    # The teacher is the checkpoint at the config's final step, even if the run was
+    # later continued beyond it (e.g. gc_B trained on to 20k for another experiment).
+    final = pathlib.Path(train_config.checkpoint_dir) / str(train_config.num_train_steps)
+    if (final / "model.safetensors").is_file():
+        return final
     latest = configs.latest_checkpoint(train_config.checkpoint_dir)
     if latest is None:
         raise FileNotFoundError(f"no checkpoint under {train_config.checkpoint_dir}; pass the directory explicitly")
