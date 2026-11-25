@@ -82,18 +82,22 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, enabled: bool = T
 
     id_file = ckpt_dir / "wandb_id.txt"
     offline = os.environ.get("WANDB_MODE", "") == "offline"
-    # A run that was started without wandb (or logged offline) has no online run to resume:
-    # start a new wandb run under the same name instead of failing.
-    if resuming and id_file.exists() and not offline:
-        run_id = id_file.read_text().strip()
-        wandb.init(id=run_id, resume="must", project=config.project_name)
-    else:
-        wandb.init(
-            name=config.exp_name,
-            config=dataclasses.asdict(config),
-            project=config.project_name,
-        )
-        (ckpt_dir / "wandb_id.txt").write_text(wandb.run.id)
+
+    def start(**extra):
+        # A run that was started without wandb (or logged offline) has no online run to resume:
+        # start a new wandb run under the same name instead of failing.
+        if resuming and id_file.exists() and not offline and not extra:
+            wandb.init(id=id_file.read_text().strip(), resume="must", project=config.project_name)
+        else:
+            wandb.init(name=config.exp_name, config=dataclasses.asdict(config), project=config.project_name, **extra)
+            if not offline and not extra:
+                id_file.write_text(wandb.run.id)
+
+    try:
+        start()
+    except Exception as exc:  # the wandb API is unreachable: keep training, log to disk, sync later
+        logging.warning(f"wandb online init failed ({exc}); logging offline instead")
+        start(mode="offline")
 
 
 def setup_ddp():

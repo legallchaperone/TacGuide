@@ -128,8 +128,10 @@ the wandb project `TacGuide` (override with `WANDB_PROJECT`). State on 2026-11-2
 
 - wandb 0.28.2 is installed in the shared env; the machine is not logged in (`wandb login` once).
 - The wandb API answers 403 to requests from the training machine (it answers normally elsewhere),
-  so online logging does not work from there directly. Use `WANDB_MODE=offline` (runs are written
-  under `/data2/cwx/TacGuide/wandb`) and upload them with `wandb sync` from a place that reaches
-  the API, or give the machine a working proxy.
+  so online logging needs a forward through a machine that reaches it: keep a reverse SOCKS forward
+  open from that machine (`ssh -N -R 127.0.0.1:<port> <training machine>`) and start training with
+  `TG_WANDB=1 TG_WANDB_PROXY=socks5h://127.0.0.1:<port>`. Only that training process uses the proxy.
+- If the API cannot be reached when training starts, the run logs offline under
+  `/data2/cwx/TacGuide/wandb` and training continues; upload later with `wandb sync`.
 - A run resumed from a checkpoint that was created without wandb (or offline) starts a new wandb
   run under the same name instead of failing on the missing `wandb_id.txt`.

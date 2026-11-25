@@ -46,6 +46,8 @@ case "$cmd" in
     ;;
   train)
     exp="${1:?gc_A or gc_B}"; gpu="${2:?gpu index}"; shift 2
+    # wandb is not reachable from every machine: TG_WANDB_PROXY (e.g. a local SOCKS forward) is used by this process only.
+    if [ -n "${TG_WANDB:-}" ] && [ -n "${TG_WANDB_PROXY:-}" ]; then export HTTPS_PROXY="$TG_WANDB_PROXY" https_proxy="$TG_WANDB_PROXY"; fi
     CUDA_VISIBLE_DEVICES="$gpu" "$PY" training/run.py train --task "$TASK" --model "$(model_for "$exp")" \
       --exp-name "$exp" --steps "$STEPS" --save-interval "$SAVE_INTERVAL" ${TG_WANDB:+--wandb} "$@"
     ;;
