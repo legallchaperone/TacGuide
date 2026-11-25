@@ -341,8 +341,12 @@ def launch(queue: dict, state: dict, name: str, gpu, log=print, args: str = "") 
     with open(log_path, "ab") as output:
         output.write(f"# gpu {visible}: {command}\n".encode())
         output.flush()
+        # `launch_prefix` lets every job run in a cgroup scope of its own (see queue.gc.json):
+        # the memory daemon then stops at most that one job instead of everything
+        # that shares the scheduler's scope.
+        prefix = [part.format(name=name, stamp=time.strftime("%H%M%S")) for part in queue.get("launch_prefix", [])]
         process = subprocess.Popen(  # noqa: S602 - the queue file is ours
-            ["bash", "-c", command],
+            [*prefix, "bash", "-c", command],
             cwd=queue["cwd"],
             env=environment,
             stdout=output,

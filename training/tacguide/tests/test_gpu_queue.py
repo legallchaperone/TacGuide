@@ -209,3 +209,14 @@ def test_two_card_job_gets_both_cards_and_releases_both(tmp_path):
     q.main(["yield", "--queue", str(queue_path), "--gpu", "4", "--hold-minutes", "5"])   # the second card counts too
     state = json.loads((tmp_path / "state/state.json").read_text())
     assert state["jobs"]["C"]["status"] == "pending" and set(state["holds"]) == {"0", "4"}
+
+
+def test_launch_prefix_wraps_the_job(tmp_path):
+    path = make_queue(tmp_path, [{"name": "job", "cmd": "echo $TG_MARK > mark.txt && touch job.done", "done_if": "job.done"}])
+    data = json.loads(path.read_text())
+    data["launch_prefix"] = ["env", "TG_MARK={name}"]
+    path.write_text(json.dumps(data))
+    queue = q.load_queue(path)
+    assert q.tick(queue, read=lambda: gpus(1), confirm_seconds=0, log=lambda m: None) == [("job", 1)]
+    assert wait_for(lambda: (tmp_path / "job.done").exists())
+    assert (tmp_path / "mark.txt").read_text().strip() == "job"
