@@ -159,6 +159,41 @@ def wait_for_calm(limit: float = 2.0, timeout: float = 900.0, read=memory_pressu
     return waited
 
 
+def wait_for_all_workers(world_size: int, rank: int, run_id: str, directory=None, sleep=None, poll: float = 2.0) -> int:
+    """File-based rendezvous: return once every worker has finished its own model loading.
+
+    Loads are serialised and can take minutes each on a busy disk, so workers reach the
+    trainer far apart; the trainer's first collective call should not have to wait for that.
+    """
+    import tempfile
+    import time
+
+    sleep = sleep or time.sleep
+    directory = pathlib.Path(directory or tempfile.gettempdir()) / f"tacguide_ready_{os.getuid()}_{run_id}"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / str(rank)).touch()
+    waited = 0
+    while len([f for f in directory.iterdir() if f.name.isdigit()]) < world_size:
+        sleep(poll)
+        waited += 1
+    return waited
+
+
+def patient_process_group(hours: float = 3.0):
+    """Give DDP collectives a long timeout (default is 10 minutes, less than a slow start-up)."""
+    import datetime
+    import functools
+
+    import torch.distributed as dist
+
+    original = dist.init_process_group
+    if getattr(original, "_tacguide_patient", False):
+        return
+    patched = functools.partial(original, timeout=datetime.timedelta(hours=hours))
+    patched._tacguide_patient = True  # noqa: SLF001
+    dist.init_process_group = patched
+
+
 @contextlib.contextmanager
 def load_lock():
     """One model load at a time across all workers of this user.
@@ -327,6 +362,13 @@ def main(argv=None):
             original_save(model, optimizer, global_step, cfg, is_main, data_config)
             if saving and is_main and args.keep_last > 0:
                 prune_checkpoints(cfg.checkpoint_dir, keep_last=args.keep_last, final_step=cfg.num_train_steps)
+
+    if world_size > 1:
+        patient_process_group()
+        run_id = os.environ.get("TORCHELASTIC_RUN_ID") or os.environ.get("MASTER_PORT") or "run"
+        logger.info("worker %d: teachers ready, waiting for the other workers", rank)
+        wait_for_all_workers(world_size, rank, f"{run_id}_{os.getppid()}")
+        logger.info("worker %d: all %d workers ready, entering the trainer", rank, world_size)
 
     original_load = train_pytorch.load_checkpoint
 

@@ -88,3 +88,21 @@ def test_load_lock_is_exclusive():
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert all(order[i][0] == "in" and order[i + 1] == ("out", order[i][1]) for i in range(0, 6, 2))
+
+
+def test_wait_for_all_workers_returns_when_everyone_checked_in(tmp_path):
+    import threading
+
+    results = {}
+
+    def worker(rank, delay):
+        import time
+
+        time.sleep(delay)
+        results[rank] = train_distill.wait_for_all_workers(3, rank, "t", directory=tmp_path, poll=0.05)
+
+    threads = [threading.Thread(target=worker, args=(r, 0.15 * r)) for r in range(3)]
+    [t.start() for t in threads]
+    [t.join(timeout=10) for t in threads]
+    assert set(results) == {0, 1, 2}
+    assert results[0] >= results[2]          # the first to arrive waits longest
