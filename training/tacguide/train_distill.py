@@ -131,8 +131,19 @@ def torchrun_command(nproc: int, argv: list[str]) -> list[str]:
             f"--nproc-per-node={nproc}", str(pathlib.Path(__file__).resolve()), *argv]
 
 
-def memory_pressure(path="/proc/pressure/memory") -> float:
+def own_pressure_file() -> str:
+    """Memory-pressure file of this user's own cgroup, falling back to the machine-wide one.
+
+    The memory daemon judges each user's cgroup separately, so that is the reading that matters;
+    the machine-wide figure is often dominated by other users' disk-bound jobs.
+    """
+    own = pathlib.Path(f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/memory.pressure")
+    return str(own) if own.is_file() else "/proc/pressure/memory"
+
+
+def memory_pressure(path=None) -> float:
     """Share of the last 10 s in which every task was stalled on memory, in percent (0 if unknown)."""
+    path = path or own_pressure_file()
     try:
         for line in pathlib.Path(path).read_text().splitlines():
             if line.startswith("full"):

@@ -25,7 +25,9 @@ STEP=10000
 
 pressure_ok() {  # refuse to add load while the machine is already stalling on memory
   local avg10
-  avg10="$(awk '/^full/ {sub("avg10=", "", $2); print $2}' /proc/pressure/memory 2>/dev/null || echo 0)"
+  local file="/sys/fs/cgroup/user.slice/user-$(id -u).slice/memory.pressure"   # our own cgroup is what the memory daemon judges
+  [ -r "$file" ] || file=/proc/pressure/memory
+  avg10="$(awk '/^full/ {sub("avg10=", "", $2); print $2}' "$file" 2>/dev/null || echo 0)"
   if awk -v v="$avg10" 'BEGIN { exit !(v > 2.0) }'; then
     echo "memory pressure is ${avg10}% (full, 10 s); not starting anything now" >&2; return 1
   fi
