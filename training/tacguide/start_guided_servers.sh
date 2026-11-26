@@ -21,7 +21,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/training/tacguide_env.sh"
 mkdir -p "$TG/logs/distill" "$TG/queue"
-STEP=10000
+STEP="${TG_STEP:-10000}"   # checkpoint step for every model served; override with TG_STEP=20000
 
 pressure_ok() {  # refuse to add load while the machine is already stalling on memory
   local avg10
