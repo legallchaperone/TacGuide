@@ -37,3 +37,17 @@ def test_latest_checkpoint(tmp_path):
     for name in ("5000", "10000", "tmp_15000"):
         (tmp_path / name).mkdir()
     assert configs.latest_checkpoint(tmp_path).name == "10000"
+
+
+def test_teacher_step_selects_that_checkpoint(tmp_path):
+    import types
+
+    for step in (10000, 20000):
+        (tmp_path / str(step)).mkdir()
+        (tmp_path / str(step) / "model.safetensors").touch()
+    config = types.SimpleNamespace(checkpoint_dir=tmp_path, num_train_steps=10000, name="pi05", pytorch_weight_path="base")
+    pick = lambda **kw: train_distill.resolve_teacher_dir(None, config, allow_partial=False, base_standin=False, **kw)  # noqa: E731
+    assert pick().name == "10000"            # default: the config final step, not the latest
+    assert pick(step=20000).name == "20000"
+    with pytest.raises(FileNotFoundError):
+        pick(step=15000)

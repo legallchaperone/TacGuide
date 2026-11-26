@@ -144,10 +144,11 @@ def test_shipped_queue_file_is_valid():
     path = pathlib.Path(q.__file__).with_name("queue.gc.json")
     queue = json.loads(path.read_text())
     names = [job["name"] for job in queue["jobs"]]
-    assert {"train_gc_C", "train_gc_D"} <= set(names) and not {"train_gc_A", "train_gc_B"} & set(names)
-    assert not {2, 5, 7} & set(queue["allowed_gpus"])
+    assert "train_gc_D" in names and not {"train_gc_A", "train_gc_B"} & set(names)
+    assert "launch_prefix" not in queue
     for job in queue["jobs"]:
-        assert {"cmd", "resume_cmd", "resume_if", "done_if", "priority"} <= set(job)
+        assert {"cmd", "resume_cmd", "resume_if", "done_if", "priority", "placements"} <= set(job)
+        assert "--teacher-step 20000" in job["cmd"] and "--overwrite" in job["cmd"] and "--resume" in job["resume_cmd"]
 
 
 def test_unset_variable_in_paths_is_refused(tmp_path, monkeypatch):

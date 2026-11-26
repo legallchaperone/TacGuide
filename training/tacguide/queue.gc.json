@@ -1,5 +1,5 @@
 {
-  "_comment": "Grasp Chip queue for the distilled students (plan section 任务队列). gc_A and gc_B are trained and resumed by the watch_ab watcher, not from here. Paths are relative to cwd; lower priority number runs first. chosen_w.txt holds the w picked in stage 4 (e.g. `2` or `1.5`). Memory figures come from the batch-64 test: student card 53 GB reserved, both teachers 31 GB reserved. A job first looks for one card with enough room for everything, otherwise it puts the student on one card and the frozen teachers on a second. Cards 2, 5 and 7 are left to the gear-assembly runs and the gc_B continuation (2026-11-25); a card that already runs a TacGuide process is never shared. First launch uses --overwrite because the trainer refuses an existing run directory; once a checkpoint exists the resume command is used. Checkpoints every 1000 steps, the two newest plus the final one are kept. Do not wrap jobs in `systemd-run --user`: scopes under user@<uid>.service are subject to the memory daemon's 50% pressure-kill rule on this machine (2026-11-25); start the scheduler from a plain ssh session in a tmux server of its own.",
+  "_comment": "Grasp Chip queue for the distilled students, 20k-step generation (2026-11-26): students train for 20000 steps like gc_B, from the 20000-step checkpoints of gc_A and gc_B, saving every 2500 steps, wandb offline. The earlier gc_C (10k steps from gc_A/10000) stays in outputs/training/pi05/gc/gc_C; the 20k control is gc_C20. Paths are relative to cwd; lower priority number runs first. chosen_w.txt holds the w to train D with (e.g. `2`). Memory figures from the batch-64 test: student card 53 GB reserved, both teachers 31 GB reserved; a job takes one card with room for everything, otherwise the student on one card and the frozen teachers on a second. A card that already runs a TacGuide process is never shared, and only `allowed_gpus` are considered. First launch uses --overwrite (the trainer refuses an existing run directory); once a checkpoint exists the resume command is used. Do not wrap jobs in `systemd-run --user`: scopes under user@<uid>.service fall under the memory daemon 50% pressure-kill rule on this machine; start the scheduler from a plain ssh session in a tmux server of its own.",
   "cwd": "$HOME/TacGuide-distill",
   "state_dir": "$TG/queue",
   "log_dir": "$TG/queue/logs",
@@ -19,8 +19,8 @@
         "w": "$TG/queue/chosen_w.txt"
       },
       "requires": [
-        "outputs/training/openvtla/gc/gc_A/10000/model.safetensors",
-        "outputs/training/pi05/gc/gc_B/10000/model.safetensors",
+        "outputs/training/openvtla/gc/gc_A/20000/model.safetensors",
+        "outputs/training/pi05/gc/gc_B/20000/model.safetensors",
         "training/tacguide/train_distill.py"
       ],
       "placements": [
@@ -37,16 +37,16 @@
           "args": "--teacher-device cuda:1"
         }
       ],
-      "cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --overwrite --save-interval 1000 {placement_args}",
+      "cmd": "source training/tacguide_env.sh && WANDB_MODE=offline PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --exp-name gc_D_w{w} --overwrite --steps 20000 --save-interval 2500 --teacher-step 20000 --weak-step 20000 --wandb {placement_args}",
       "resume_if": "outputs/training/pi05/gc/gc_D_w{w}/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --resume --save-interval 1000 {placement_args}",
-      "done_if": "outputs/training/pi05/gc/gc_D_w{w}/10000/model.safetensors"
+      "resume_cmd": "source training/tacguide_env.sh && WANDB_MODE=offline PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w{w} --exp-name gc_D_w{w} --resume --steps 20000 --save-interval 2500 --teacher-step 20000 --weak-step 20000 --wandb {placement_args}",
+      "done_if": "outputs/training/pi05/gc/gc_D_w{w}/20000/model.safetensors"
     },
     {
-      "name": "train_gc_C",
+      "name": "train_gc_C20",
       "priority": 3.5,
       "requires": [
-        "outputs/training/openvtla/gc/gc_A/10000/model.safetensors",
+        "outputs/training/openvtla/gc/gc_A/20000/model.safetensors",
         "training/tacguide/train_distill.py"
       ],
       "placements": [
@@ -63,37 +63,10 @@
           "args": "--teacher-device cuda:1"
         }
       ],
-      "cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_C --overwrite --save-interval 1000 {placement_args}",
-      "resume_if": "outputs/training/pi05/gc/gc_C/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_C --resume --save-interval 1000 {placement_args}",
-      "done_if": "outputs/training/pi05/gc/gc_C/10000/model.safetensors"
-    },
-    {
-      "name": "train_gc_D_w2_extra",
-      "priority": 5,
-      "requires": [
-        "outputs/training/openvtla/gc/gc_A/10000/model.safetensors",
-        "outputs/training/pi05/gc/gc_B/10000/model.safetensors",
-        "training/tacguide/train_distill.py"
-      ],
-      "placements": [
-        {
-          "min_free_mib": [
-            90000
-          ]
-        },
-        {
-          "min_free_mib": [
-            55000,
-            33000
-          ],
-          "args": "--teacher-device cuda:1"
-        }
-      ],
-      "cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --overwrite --save-interval 1000 {placement_args}",
-      "resume_if": "outputs/training/pi05/gc/gc_D_w2/[0-9]*/model.safetensors",
-      "resume_cmd": "source training/tacguide_env.sh && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_D_w2 --resume --save-interval 1000 {placement_args}",
-      "done_if": "outputs/training/pi05/gc/gc_D_w2/10000/model.safetensors",
+      "cmd": "source training/tacguide_env.sh && WANDB_MODE=offline PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_C --exp-name gc_C20 --overwrite --steps 20000 --save-interval 2500 --teacher-step 20000 --weak-step 20000 --wandb {placement_args}",
+      "resume_if": "outputs/training/pi05/gc/gc_C20/[0-9]*/model.safetensors",
+      "resume_cmd": "source training/tacguide_env.sh && WANDB_MODE=offline PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $TG/venv/bin/python training/tacguide/train_distill.py gc_C --exp-name gc_C20 --resume --steps 20000 --save-interval 2500 --teacher-step 20000 --weak-step 20000 --wandb {placement_args}",
+      "done_if": "outputs/training/pi05/gc/gc_C20/20000/model.safetensors",
       "enabled": false
     }
   ]

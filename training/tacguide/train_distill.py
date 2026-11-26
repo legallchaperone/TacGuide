@@ -51,7 +51,9 @@ def parse_args(argv=None):
     parser.add_argument("--base-standin", action="store_true", help="use the pi0.5 base weights for A and B (tests only)")
     parser.add_argument("--teacher-device", help="put the frozen teachers on another device, e.g. cuda:1")
     parser.add_argument("--num-workers", type=int, default=2)
-    parser.add_argument("--steps", type=int, help="override the number of training steps (tests only)")
+    parser.add_argument("--steps", type=int, help="number of training steps (default: the released value for the task)")
+    parser.add_argument("--teacher-step", type=int, help="checkpoint step of A to distil from (default: its final step)")
+    parser.add_argument("--weak-step", type=int, help="checkpoint step of B to use (default: its final step)")
     parser.add_argument("--batch-size", type=int, help="override the batch size (tests only)")
     parser.add_argument("--save-interval", type=int, help="override the checkpoint interval")
     parser.add_argument("--keep-last", type=int, default=2, help="checkpoints to keep besides the final one; 0 keeps all")
@@ -86,13 +88,18 @@ def load_teacher(train_config, checkpoint_dir, device, *, base_standin: bool = F
     return freeze(model.to(device))
 
 
-def resolve_teacher_dir(explicit, train_config, *, allow_partial: bool, base_standin: bool):
+def resolve_teacher_dir(explicit, train_config, *, allow_partial: bool, base_standin: bool, step: int | None = None):
     from tacguide import configs
 
     if base_standin:
         return pathlib.Path(train_config.pytorch_weight_path)
     if explicit:
         return pathlib.Path(explicit)
+    if step is not None:
+        chosen = pathlib.Path(train_config.checkpoint_dir) / str(step)
+        if not (chosen / "model.safetensors").is_file():
+            raise FileNotFoundError(f"checkpoint {chosen} does not exist (yet)")
+        return chosen
     # The teacher is the checkpoint at the config's final step, even if the run was
     # later continued beyond it (e.g. gc_B trained on to 20k for another experiment).
     final = pathlib.Path(train_config.checkpoint_dir) / str(train_config.num_train_steps)
@@ -189,14 +196,14 @@ def main(argv=None):
     teacher_device = torch.device(args.teacher_device) if args.teacher_device else device
 
     teachers, to_check = {}, []
-    for label, needed, teacher_config, explicit in (
-        ("strong", need_strong, strong_config, args.teacher_dir),
-        ("weak", need_weak, weak_config, args.weak_dir),
+    for label, needed, teacher_config, explicit, step in (
+        ("strong", need_strong, strong_config, args.teacher_dir, args.teacher_step),
+        ("weak", need_weak, weak_config, args.weak_dir, args.weak_step),
     ):
         if not needed:
             continue
         directory = resolve_teacher_dir(
-            explicit, teacher_config, allow_partial=args.allow_partial_teacher, base_standin=args.base_standin
+            explicit, teacher_config, allow_partial=args.allow_partial_teacher, base_standin=args.base_standin, step=step
         )
         logger.info("loading frozen teacher %s (%s) from %s", label, teacher_config.name, directory)
         teachers[label] = load_teacher(teacher_config, directory, teacher_device, base_standin=args.base_standin)
