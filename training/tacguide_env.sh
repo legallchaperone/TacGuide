@@ -16,3 +16,9 @@ export WANDB_PROJECT=TacGuide
 export TORCH_HOME=$TG/cache/torch
 export TMPDIR=$TG/cache/tmp
 mkdir -p "$TMPDIR"
+# The machine has 384 cores. Unlimited intra-op threads during a model load pushed the load above 190
+# and every job of the account was killed (2026-11-26). Keep CPU thread pools small unless overridden.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-8}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-8}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-8}"

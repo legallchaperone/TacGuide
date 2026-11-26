@@ -14,12 +14,17 @@ assembles them (see policy/openpi/tactile_history.py).
 
 import argparse
 import logging
+import os
 from pathlib import Path
 import sys
 import types
 
 TRAINING = Path(__file__).resolve().parent
 sys.path.insert(0, str(TRAINING))
+
+# Cap CPU thread pools before torch starts: on this 384-core machine an uncapped load takes every job down.
+for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_var, "8")
 
 import config as tg_config  # noqa: E402
 import run as tg_run  # noqa: E402
@@ -82,6 +87,9 @@ def parse_args():
 
 
 def main():
+    import torch
+
+    torch.set_num_threads(int(os.environ["OMP_NUM_THREADS"]))
     args = parse_args()
     logging.basicConfig(level=logging.INFO, force=True)
     from openpi.serving import websocket_policy_server
