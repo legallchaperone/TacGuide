@@ -135,3 +135,13 @@ the wandb project `TacGuide` (override with `WANDB_PROJECT`). State on 2026-11-2
   `/data2/cwx/TacGuide/wandb` and training continues; upload later with `wandb sync`.
 - A run resumed from a checkpoint that was created without wandb (or offline) starts a new wandb
   run under the same name instead of failing on the missing `wandb_id.txt`.
+
+## Several cards for one run
+
+`training/tacguide.sh train <run> 2,3,4,5 [--resume]` uses the released DDP path (torchrun). The
+global batch stays 64 and is split across the cards, so the number of cards must divide 64 (2 or 4).
+Each rank is given only its own card. Measured on gc_A (2026-11-26): 2.2 s/step on four cards
+against 6.1 s/step on one. After starting several ranks the file cache of the dataset may be gone
+and the data workers then wait on the slow disk (io pressure above 40%, about 4 s/step); reading the
+dataset once (`find -L data/training/lerobot/<task> -type f -print0 | xargs -0 -P 4 cat > /dev/null`)
+brings the speed back. `training/watch_ab.sh` only knows single-card runs.

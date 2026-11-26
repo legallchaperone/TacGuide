@@ -48,7 +48,11 @@ case "$cmd" in
     exp="${1:?gc_A or gc_B}"; gpu="${2:?gpu index}"; shift 2
     # wandb is not reachable from every machine: TG_WANDB_PROXY (e.g. a local SOCKS forward) is used by this process only.
     if [ -n "${TG_WANDB:-}" ] && [ -n "${TG_WANDB_PROXY:-}" ]; then export HTTPS_PROXY="$TG_WANDB_PROXY" https_proxy="$TG_WANDB_PROXY"; fi
-    CUDA_VISIBLE_DEVICES="$gpu" "$PY" training/run.py train --task "$TASK" --model "$(model_for "$exp")" \
+    # One card: plain python. Several cards ("2,3,4,5"): the released DDP path through torchrun; the
+    # global batch stays 64 and is split across the cards, so the count must divide 64.
+    ncards=$(awk -F, "{print NF}" <<<"$gpu")
+    launcher=("$PY"); [ "$ncards" -gt 1 ] && launcher=("$PY" -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node="$ncards")
+    CUDA_VISIBLE_DEVICES="$gpu" "${launcher[@]}" training/run.py train --task "$TASK" --model "$(model_for "$exp")" \
       --exp-name "$exp" --steps "$STEPS" --save-interval "$SAVE_INTERVAL" ${TG_WANDB:+--wandb} "$@"
     ;;
   serve)

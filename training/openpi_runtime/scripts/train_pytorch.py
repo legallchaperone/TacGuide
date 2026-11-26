@@ -112,7 +112,9 @@ def setup_ddp():
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
 
     local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
-    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+    # When each rank is given only its own card (run.py narrows CUDA_VISIBLE_DEVICES), that card is cuda:0.
+    device_index = local_rank if torch.cuda.device_count() > local_rank else 0
+    device = torch.device(f"cuda:{device_index}" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
         torch.cuda.set_device(device)
     return use_ddp, local_rank, device
@@ -244,7 +246,9 @@ def load_checkpoint(model, optimizer, checkpoint_dir, device):
         optimizer_path = ckpt_dir / "optimizer.pt"
 
         if optimizer_path.exists():
-            optimizer_state_dict = torch.load(optimizer_path, map_location=device, weights_only=False)
+            # Load to CPU first; Optimizer.load_state_dict moves each tensor to the device of its parameter.
+            # Loading the 13 GB file straight onto the card failed with a CUDA illegal-memory-access under DDP.
+            optimizer_state_dict = torch.load(optimizer_path, map_location="cpu", weights_only=False)
             logging.info("Loaded optimizer state from pt format")
         else:
             raise FileNotFoundError(f"No optimizer checkpoint found at {ckpt_dir}")

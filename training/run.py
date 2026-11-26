@@ -10,6 +10,11 @@ import sys
 
 from config import ACTION_HORIZON, BATCH_SIZE, DATA, MODELS, OUTPUTS, ROOT, RUNTIME, TASKS, WEIGHTS, steps_for
 
+# Under torchrun every rank sees all cards; give each rank only its own, before CUDA (torch or jax) starts.
+_cards = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+if os.environ.get("LOCAL_RANK") is not None and len(_cards) > 1:
+    os.environ["CUDA_VISIBLE_DEVICES"] = _cards[int(os.environ["LOCAL_RANK"])]
+
 os.environ["HF_LEROBOT_HOME"] = str(DATA / "lerobot")
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 sys.path.insert(0, str(RUNTIME / "scripts"))
