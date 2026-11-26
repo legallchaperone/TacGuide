@@ -385,9 +385,32 @@ def main(argv=None):
 
     original_load = train_pytorch.load_checkpoint
 
-    def locked_load(*load_args, **load_kwargs):
+    def locked_load(model, optimizer, checkpoint_dir, load_device):
+        """Resume one worker: read the checkpoint into host memory, then move it to the worker's card.
+
+        The runtime's own loader deserialises the 14 GB optimizer file straight onto `cuda:<rank>`;
+        on a 4-worker resume that died with a CUDA illegal-memory-access error in a non-zero rank
+        (2026-11-26), while the same file loads cleanly on any single card. Loading on the CPU and
+        letting `load_state_dict` place each tensor next to its parameter avoids that path.
+        """
+        import safetensors.torch
+
         with load_lock():
-            return original_load(*load_args, **load_kwargs)
+            step = configs.latest_checkpoint(checkpoint_dir)
+            if step is None:
+                raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
+            target = model.module if hasattr(model, "module") else model
+            logger.info("worker %d: restoring the student from %s", rank, step)
+            safetensors.torch.load_model(target, str(step / "model.safetensors"), device="cpu")
+            state = torch.load(step / "optimizer.pt", map_location="cpu", weights_only=False)
+            optimizer.load_state_dict(state)
+            del state
+            metadata = torch.load(step / "metadata.pt", map_location="cpu", weights_only=False)
+            global_step = int(metadata.get("global_step", int(step.name)))
+            if torch.cuda.is_available():
+                torch.cuda.synchronize(load_device)
+            logger.info("worker %d: restored step %d", rank, global_step)
+            return global_step
 
     original_class = pi0_pytorch.PI0Pytorch
     pi0_pytorch.PI0Pytorch = make_student
