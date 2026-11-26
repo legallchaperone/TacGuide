@@ -51,3 +51,40 @@ def test_teacher_step_selects_that_checkpoint(tmp_path):
     assert pick(step=20000).name == "20000"
     with pytest.raises(FileNotFoundError):
         pick(step=15000)
+
+
+def test_torchrun_command_keeps_the_arguments():
+    command = train_distill.torchrun_command(4, ["gc_D_w2", "--steps", "20000", "--nproc", "4"])
+    assert command[1:4] == ["-m", "torch.distributed.run", "--standalone"]
+    assert "--nproc-per-node=4" in command and command[-5:] == ["gc_D_w2", "--steps", "20000", "--nproc", "4"]
+    assert command[-6].endswith("train_distill.py")
+
+
+def test_wait_for_calm_waits_only_under_pressure(tmp_path):
+    readings = iter([30.0, 12.0, 0.5])
+    naps = []
+    assert train_distill.wait_for_calm(read=lambda: next(readings), sleep=naps.append) == 30.0
+    assert naps == [15.0, 15.0]
+    assert train_distill.wait_for_calm(read=lambda: 0.0, sleep=naps.append) == 0.0
+    stat = tmp_path / "memory"
+    stat.write_text("some avg10=1.00 avg60=2.00 avg300=3.00 total=1\nfull avg10=7.25 avg60=2.00 avg300=3.00 total=1\n")
+    assert train_distill.memory_pressure(stat) == 7.25
+    assert train_distill.memory_pressure(tmp_path / "missing") == 0.0
+
+
+def test_load_lock_is_exclusive():
+    import threading
+    import time
+
+    order = []
+
+    def worker(tag):
+        with train_distill.load_lock():
+            order.append(("in", tag))
+            time.sleep(0.2)
+            order.append(("out", tag))
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(3)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert all(order[i][0] == "in" and order[i + 1] == ("out", order[i][1]) for i in range(0, 6, 2))
