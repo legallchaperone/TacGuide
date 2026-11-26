@@ -54,9 +54,9 @@ def test_teacher_step_selects_that_checkpoint(tmp_path):
 
 
 def test_torchrun_command_keeps_the_arguments():
-    command = train_distill.torchrun_command(4, ["gc_D_w2", "--steps", "20000", "--nproc", "4"])
+    command = train_distill.torchrun_command(4, ["gc_D_w2", "--steps", "20000", "--gpus", "4"])
     assert command[1:4] == ["-m", "torch.distributed.run", "--standalone"]
-    assert "--nproc-per-node=4" in command and command[-5:] == ["gc_D_w2", "--steps", "20000", "--nproc", "4"]
+    assert "--nproc-per-node=4" in command and command[-5:] == ["gc_D_w2", "--steps", "20000", "--gpus", "4"]
     assert command[-6].endswith("train_distill.py")
 
 

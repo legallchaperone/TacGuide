@@ -17,7 +17,7 @@ Checks from the plan:
     # memory: batch 64 for 100 steps, base weights standing in for A and B
     ... gc_D_w2 --exp-name memtest --steps 100 --no-save --no-wandb --base-standin
 
-Several cards: add ``--nproc 4`` (with CUDA_VISIBLE_DEVICES naming four cards). The script
+Several cards: add ``--gpus 4`` (with CUDA_VISIBLE_DEVICES naming four cards). The script
 re-launches itself as four DDP workers; each keeps its own frozen teachers on its own card,
 the batch of 64 is split 16 per worker, and model loads are serialised across workers (and
 wait while the machine is under memory pressure).
@@ -57,7 +57,7 @@ def parse_args(argv=None):
     parser.add_argument("--allow-partial-teacher", action="store_true", help="accept a teacher that is not at its final step")
     parser.add_argument("--base-standin", action="store_true", help="use the pi0.5 base weights for A and B (tests only)")
     parser.add_argument("--teacher-device", help="put the frozen teachers on another device, e.g. cuda:1")
-    parser.add_argument("--nproc", type=int, default=1,
+    parser.add_argument("--gpus", dest="nproc", type=int, default=1,
                         help="train on this many GPUs (one process per card, each with its own copy of the teachers)")
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--steps", type=int, help="number of training steps (default: the released value for the task)")
@@ -220,7 +220,7 @@ def main(argv=None):
     rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
     if args.nproc > 1 and world_size == 1:
         if args.teacher_device:
-            raise SystemExit("--teacher-device cannot be combined with --nproc: every worker keeps its teachers on its own card")
+            raise SystemExit("--teacher-device cannot be combined with --gpus: every worker keeps its teachers on its own card")
         command = torchrun_command(args.nproc, list(sys.argv[1:] if argv is None else argv))
         os.execv(command[0], command)
     if world_size > 1 and args.teacher_device:

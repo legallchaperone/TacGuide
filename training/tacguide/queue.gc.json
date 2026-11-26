@@ -31,7 +31,7 @@
             45000,
             45000
           ],
-          "args": "--nproc 4"
+          "args": "--gpus 4"
         },
         {
           "min_free_mib": [
