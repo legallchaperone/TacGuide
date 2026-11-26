@@ -21,6 +21,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/training/tacguide_env.sh"
 mkdir -p "$TG/logs/distill" "$TG/queue"
+# Never let a model load fan out over every core of the machine (see serve_guided.limit_cpu_threads).
+export OMP_NUM_THREADS="${TG_CPU_THREADS:-8}" MKL_NUM_THREADS="${TG_CPU_THREADS:-8}"
 STEP="${TG_STEP:-10000}"   # checkpoint step for every model served; override with TG_STEP=20000
 
 pressure_ok() {  # refuse to add load while the machine is already stalling on memory

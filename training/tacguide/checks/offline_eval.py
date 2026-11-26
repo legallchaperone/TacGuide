@@ -26,6 +26,12 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
+import os  # noqa: E402
+
+for _name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):  # one thread per core stalls the shared machine
+    os.environ.setdefault(_name, os.environ.get("TG_CPU_THREADS", "8"))
+
+
 import numpy as np
 
 CHUNK_EPISODES = (0, 1, 12, 33, 49, 71, 88)

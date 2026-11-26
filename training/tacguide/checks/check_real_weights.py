@@ -25,6 +25,12 @@ import sys
 _TRAINING_DIR = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_TRAINING_DIR))
 
+import os  # noqa: E402
+
+for _name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):  # one thread per core stalls the shared machine
+    os.environ.setdefault(_name, os.environ.get("TG_CPU_THREADS", "8"))
+
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

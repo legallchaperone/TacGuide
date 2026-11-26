@@ -254,6 +254,8 @@ def check_norm_stats(student_config, teacher_configs_and_dirs):
 
 def main(argv=None):
     args = parse_args(argv)
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):  # one thread per core stalls the shared machine
+        os.environ.setdefault(name, os.environ.get("TG_CPU_THREADS", "8"))
 
     from tacguide import configs
 

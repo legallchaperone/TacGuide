@@ -73,9 +73,30 @@ def build_policy(args):
     return policy, description
 
 
+def limit_cpu_threads(default: int = 8) -> int:
+    """Cap CPU threads before torch is imported.
+
+    Unlimited, model construction starts one thread per core (384 on the training machine). On a
+    busy machine those threads starve each other and everything else: a load that takes a minute
+    took 5 to 15, the load average passed 190 and all of the user's jobs were killed (2026-11-25/26).
+    """
+    import os
+
+    count = int(os.environ.get("TG_CPU_THREADS", default))
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[name] = str(count)
+    return count
+
+
 def main(argv=None):
     args = parse_args(argv)
     logging.basicConfig(level=logging.INFO, force=True)
+    threads = limit_cpu_threads()
+
+    import torch
+
+    torch.set_num_threads(threads)
+    logger.info("CPU threads limited to %d", threads)
 
     from openpi.serving import websocket_policy_server
 
