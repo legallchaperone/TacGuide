@@ -141,7 +141,9 @@ the wandb project `TacGuide` (override with `WANDB_PROJECT`). State on 2026-11-2
 `training/tacguide.sh train <run> 2,3,4,5 [--resume]` uses the released DDP path (torchrun). The
 global batch stays 64 and is split across the cards, so the number of cards must divide 64 (2 or 4).
 Each rank is given only its own card. Measured on gc_A (2026-11-26): 2.2 s/step on four cards
-against 6.1 s/step on one. After starting several ranks the file cache of the dataset may be gone
-and the data workers then wait on the slow disk (io pressure above 40%, about 4 s/step); reading the
-dataset once (`find -L data/training/lerobot/<task> -type f -print0 | xargs -0 -P 4 cat > /dev/null`)
-brings the speed back. `training/watch_ab.sh` only knows single-card runs.
+against 6.1 s/step on one. /data2 is a hard disk and the data workers memory-map the Hugging Face arrow cache of the dataset
+(`$TG/cache/hf/datasets/parquet/default-*/.../parquet-train-*.arrow`, about 10 GB per task), not the
+parquet files. After a restart that cache may have dropped out of memory; training then crawls at
+about 4 s/step until it is read back. Warm it before or right after starting:
+`find $TG/cache/hf/datasets/parquet -name "*.arrow" -print0 | xargs -0 -P 4 cat > /dev/null`.
+`training/watch_ab.sh` only knows single-card runs.
